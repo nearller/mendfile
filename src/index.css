@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-800 antialiased;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+a {
+  @apply text-brand-600 hover:text-brand-700;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 shadow-card;
+  }
+  .btn-secondary {
+    @apply btn bg-white text-slate-700 border border-slate-200 hover:bg-slate-50;
+  }
+  .btn-danger {
+    @apply btn bg-red-500 text-white hover:bg-red-600;
+  }
+  .card {
+    @apply bg-white rounded-xl border border-slate-100 shadow-card;
+  }
+  .input {
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition;
+  }
+  .chip {
+    @apply inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600;
+  }
+  .page-padding {
+    @apply px-4 sm:px-6 lg:px-10;
+  }
+  .prose-page {
+    @apply prose prose-slate max-w-none prose-headings:text-slate-800 prose-a:text-brand-600;
+  }
+}
+
+/* 上传拖拽高亮 */
+.dropzone-active {
+  @apply !border-brand-500 !bg-brand-50/70;
+}
+
+/* 进度条 */
+.progress-track {
+  @apply w-full h-2 rounded-full bg-slate-100 overflow-hidden;
+}
+.progress-bar {
+  @apply h-full rounded-full bg-gradient-to-r from-brand-500 to-brand-700 transition-all duration-200;
+}
+
+/* 滚动条更柔和 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-300;
+}

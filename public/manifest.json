@@ -1,0 +1,12 @@
+{
+  "name": "MendFile 全能办公工具",
+  "short_name": "MendFile",
+  "description": "免费无广告、纯前端本地处理的在线办公工具平台，支持PDF全品类工具与后续拓展。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2575f5",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

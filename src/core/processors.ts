@@ -14,9 +14,10 @@ import {
   degrees,
   rgb,
 } from 'pdf-lib';
-import type { ProcessFn, ProgressFn } from './types';
+import type { ProcessFn, ProcessOutput, ProgressFn } from './types';
 import {
   readAsArrayBuffer,
+  readAsDataURL,
   loadImage,
   canvasToBlob,
   formatBytes,
@@ -1238,5 +1239,331 @@ export const pdfMetadata: ProcessFn = async ({ files, options }, onProgress) => 
     ext: 'pdf',
     fileName: `${stripExt(safeName(files[0].name))}_元数据已更新`,
     preview: { stats: { 页数: src.getPageCount(), 操作: options.clear ? '清空敏感元数据' : '自定义修改' } },
+  };
+};
+
+/* =========================================================
+ *  二期 · 批次 1 · 图片工具全集（纯 Canvas，无后端）
+ * ========================================================= */
+
+/** 格式映射：选项 → MIME type */
+function fmtToMime(format: string): string {
+  switch (String(format).toLowerCase()) {
+    case 'jpg': case 'jpeg': return 'image/jpeg';
+    case 'png': return 'image/png';
+    case 'webp': return 'image/webp';
+    case 'bmp': return 'image/bmp';
+    default: return 'image/png';
+  }
+}
+
+/** 格式映射：选项 → 扩展名 */
+function fmtToExt(format: string): string {
+  const f = String(format).toLowerCase();
+  if (f === 'jpeg') return 'jpg';
+  if (['jpg', 'png', 'webp', 'bmp'].includes(f)) return f;
+  return 'png';
+}
+
+/** 从文件名/MIME 推断输入格式（小写） */
+function inferFormat(file: File, fallback = 'png'): string {
+  if (/\.jpe?g$/i.test(file.name) || file.type === 'image/jpeg') return 'jpg';
+  if (/\.png$/i.test(file.name) || file.type === 'image/png') return 'png';
+  if (/\.webp$/i.test(file.name) || file.type === 'image/webp') return 'webp';
+  if (/\.bmp$/i.test(file.name) || file.type === 'image/bmp') return 'bmp';
+  return fallback;
+}
+
+/** 绘制图片到 canvas（必要时缩放），返回 canvas */
+function drawScaled(img: HTMLImageElement, maxW?: number, maxH?: number, bgColor?: string): HTMLCanvasElement {
+  let w = img.naturalWidth;
+  let h = img.naturalHeight;
+  if (maxW || maxH) {
+    const scale = Math.min(
+      maxW ? maxW / w : 1,
+      maxH ? maxH / h : 1,
+      1
+    );
+    if (scale < 1) {
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+    }
+  }
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d')!;
+  if (bgColor) {
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, w, h);
+  }
+  ctx.drawImage(img, 0, 0, w, h);
+  return c;
+}
+
+/** 打包 results 为 ZIP 或 单文件 Blob；返回统一的 ProcessOutput */
+async function packImages(
+  results: { name: string; blob: Blob }[],
+  defaultExt: string,
+  defaultFileName: string,
+  onProgress: ProgressFn
+): Promise<ProcessOutput> {
+  if (!results.length) throw new Error('没有可用的输出结果');
+  if (results.length === 1) {
+    const r = results[0];
+    onProgress(0.95, '准备下载');
+    return {
+      blob: r.blob,
+      ext: stripExt(r.name.split('.').pop() || defaultExt),
+      fileName: stripExt(r.name),
+      preview: { stats: { 输出文件数: 1, 总大小: formatBytes(r.blob.size) } },
+    };
+  }
+  onProgress(0.9, '正在打包 ZIP');
+  const zip = new JSZip();
+  let total = 0;
+  results.forEach((r) => { zip.file(r.name, r.blob); total += r.blob.size; });
+  const buf = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+  onProgress(0.98, '打包完成');
+  return {
+    blob: buf,
+    ext: 'zip',
+    fileName: defaultFileName,
+    preview: { stats: { 输出文件数: results.length, 打包总大小: formatBytes(total) } },
+  };
+}
+
+/** 解析颜色 #RRGGBB → {r,g,b} */
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace('#', '').trim();
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const num = parseInt(full || 'ffffff', 16);
+  return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+}
+
+/* ============ 图片批量压缩 ============ */
+export const imageCompress: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  const level = options.level || 'normal';
+  const qualityCfg: Record<string, number> = { light: 0.85, normal: 0.7, extreme: 0.45 };
+  const quality = qualityCfg[level] ?? 0.7;
+  const results: { name: string; blob: Blob }[] = [];
+  const stats: Record<string, any> = {};
+  let beforeTotal = 0; let afterTotal = 0;
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    beforeTotal += f.size;
+    onProgress(0.05 + (fi / files.length) * 0.8, `正在处理 ${fi + 1}/${files.length}：${f.name}`);
+    const src = await readAsDataURL(f);
+    const img = await loadImage(src);
+    const inFmt = inferFormat(f, 'jpg');
+    // 极致模式：最长边缩放到 1920
+    const maxLong = level === 'extreme' ? 1920 : undefined;
+    const ratio = img.naturalWidth >= img.naturalHeight ? (maxLong ? img.naturalWidth / maxLong : 1) : (maxLong ? img.naturalHeight / maxLong : 1);
+    const c = ratio > 1
+      ? drawScaled(img, img.naturalWidth > img.naturalHeight ? maxLong : undefined, img.naturalHeight > img.naturalWidth ? maxLong : undefined)
+      : drawScaled(img);
+    // 若输入是 PNG（透明），保留 PNG；否则用输入格式
+    const useFmt = inFmt;
+    const mime = fmtToMime(useFmt);
+    // PNG 无 quality 参数，quality 仍然传入 toBlob，浏览器会忽略
+    const blob = await canvasToBlob(c, mime, quality);
+    afterTotal += blob.size;
+    const ratioStr = beforeTotal ? Math.round((1 - afterTotal / beforeTotal) * 100) : 0;
+    results.push({ name: `${stripExt(safeName(f.name))}_compressed.${fmtToExt(useFmt)}`, blob });
+  }
+  stats['处理文件数'] = files.length;
+  stats['压缩前总大小'] = formatBytes(beforeTotal);
+  stats['压缩后总大小'] = formatBytes(afterTotal);
+  stats['总体积减少'] = beforeTotal ? `${Math.max(0, Math.round((1 - afterTotal / beforeTotal) * 100))}%` : '0%';
+  stats['压缩档位'] = level === 'light' ? '轻度（85%）' : level === 'extreme' ? '极致（45%+缩放）' : '标准（70%）';
+  return packImages(results, 'zip', `MendFile_图片压缩结果_${stats['总体积减少']}`, (r, m) => onProgress(0.85 + r * 0.12, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 图片批量格式互转 ============ */
+export const imageConvert: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  const targetFmt = (options.format || 'same').toLowerCase();
+  const quality = Math.max(0.1, Math.min(1, Number(options.quality ?? 0.85)));
+  const fillColor = options.fillColor || '#ffffff';
+  const results: { name: string; blob: Blob }[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.8, `正在转换 ${fi + 1}/${files.length}：${f.name}`);
+    const src = await readAsDataURL(f);
+    const img = await loadImage(src);
+    const outFmt = targetFmt === 'same' ? inferFormat(f, 'png') : targetFmt;
+    const mime = fmtToMime(outFmt);
+    // PNG → 无透明格式：先填底色
+    const needFill = (outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'bmp') && inferFormat(f, '') === 'png';
+    const c = needFill ? drawScaled(img, undefined, undefined, fillColor) : drawScaled(img);
+    // 只有 jpg / webp 传 quality，其他保持默认
+    const q = (outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'webp') ? quality : undefined;
+    const blob = await canvasToBlob(c, mime, q ?? 0.92);
+    results.push({ name: `${stripExt(safeName(f.name))}.${fmtToExt(outFmt)}`, blob });
+  }
+  return packImages(results, 'zip', 'MendFile_图片格式转换结果', (r, m) => onProgress(0.85 + r * 0.12, m || ''));
+};
+
+/* ============ 智能证件照工具 ============ */
+export const idPhoto: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '正在读取图片');
+  const file = files[0];
+  if (!file) throw new Error('请上传一张人像照片');
+  const src = await readAsDataURL(file);
+  const img = await loadImage(src);
+
+  // 尺寸模板
+  const templates: Record<string, { w: number; h: number; label: string }> = {
+    '1inch': { w: 295, h: 413, label: '一寸 25×35mm' },
+    '2inch': { w: 413, h: 579, label: '二寸 35×49mm' },
+    'small1inch': { w: 260, h: 378, label: '小一寸' },
+    'small2inch': { w: 413, h: 531, label: '小二寸' },
+    'big1inch': { w: 390, h: 567, label: '大一寸' },
+    'passport': { w: 390, h: 567, label: '护照签证' },
+    'custom': { w: Number(options.customW) || 295, h: Number(options.customH) || 413, label: '自定义' },
+  };
+  const tpl = templates[options.template || '1inch'] || templates['1inch'];
+  const tw = tpl.w; const th = tpl.h;
+
+  onProgress(0.2, '按模板比例居中裁剪');
+  // === 居中裁剪：按目标比例先 crop 原图再 resize 到目标尺寸 ===
+  const srcRatio = img.naturalWidth / img.naturalHeight;
+  const dstRatio = tw / th;
+  let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight;
+  if (srcRatio > dstRatio) {
+    sw = Math.round(img.naturalHeight * dstRatio);
+    sx = Math.round((img.naturalWidth - sw) / 2);
+  } else {
+    sh = Math.round(img.naturalWidth / dstRatio);
+    sy = Math.round((img.naturalHeight - sh) / 2);
+  }
+  const out = document.createElement('canvas');
+  out.width = tw; out.height = th;
+  const ctx = out.getContext('2d')!;
+  // 默认透明（保留原色）
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, tw, th);
+
+  // === 换底色 ===
+  const bgMode: string = options.bgMode || 'keep'; // keep / white / blue / red / gradient / custom
+  if (bgMode !== 'keep') {
+    onProgress(0.4, '正在进行换底处理');
+    let newColor: { r: number; g: number; b: number } = { r: 255, g: 255, b: 255 };
+    let useGradient = false;
+    if (bgMode === 'white') newColor = hexToRgb('#FFFFFF');
+    else if (bgMode === 'blue') newColor = hexToRgb('#438EDB');
+    else if (bgMode === 'red') newColor = hexToRgb('#D9383E');
+    else if (bgMode === 'gradient') useGradient = true;
+    else if (bgMode === 'custom') newColor = hexToRgb(options.customColor || '#ffffff');
+
+    const imgData = ctx.getImageData(0, 0, tw, th);
+    const d = imgData.data;
+    // 取四边角平均作为"原底色"
+    const cornorSample = [
+      [0, 0], [tw - 1, 0], [0, th - 1], [tw - 1, th - 1],
+      [Math.floor(tw / 2), 0], [Math.floor(tw / 2), th - 1],
+      [0, Math.floor(th / 2)], [tw - 1, Math.floor(th / 2)],
+    ];
+    let br = 0, bg = 0, bb = 0;
+    cornorSample.forEach(([x, y]) => {
+      const i = (y * tw + x) * 4;
+      br += d[i]; bg += d[i + 1]; bb += d[i + 2];
+    });
+    br = Math.round(br / cornorSample.length);
+    bg = Math.round(bg / cornorSample.length);
+    bb = Math.round(bb / cornorSample.length);
+
+    // 阈值：色差 < threshold 判定为背景（然后做 2px 羽化）
+    const threshold = 90;
+    for (let y = 0; y < th; y++) {
+      for (let x = 0; x < tw; x++) {
+        const i = (y * tw + x) * 4;
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        const dr = r - br, dg = g - bg, db = b - bb;
+        const diff = Math.sqrt(dr * dr + dg * dg + db * db);
+        if (diff < threshold) {
+          // 背景：替换成新颜色
+          let nr = newColor.r, ng = newColor.g, nb = newColor.b;
+          if (useGradient) {
+            const t = y / th;
+            nr = Math.round(67 * (1 - t) + 142 * t);
+            ng = Math.round(142 * (1 - t) + 222 * t);
+            nb = Math.round(219 * (1 - t) + 255 * t);
+          }
+          d[i] = nr; d[i + 1] = ng; d[i + 2] = nb; d[i + 3] = 255;
+        } else if (diff < threshold + 40) {
+          // 边缘羽化：线性插值 20~30% 新颜色
+          const k = (diff - threshold) / 40;
+          const alpha = 1 - k;
+          let nr = newColor.r, ng = newColor.g, nb = newColor.b;
+          if (useGradient) {
+            const t = y / th;
+            nr = Math.round(67 * (1 - t) + 142 * t);
+            ng = Math.round(142 * (1 - t) + 222 * t);
+            nb = Math.round(219 * (1 - t) + 255 * t);
+          }
+          d[i] = Math.round(r * (1 - alpha * 0.5) + nr * alpha * 0.5);
+          d[i + 1] = Math.round(g * (1 - alpha * 0.5) + ng * alpha * 0.5);
+          d[i + 2] = Math.round(b * (1 - alpha * 0.5) + nb * alpha * 0.5);
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  }
+
+  const mode: string = options.output || 'single'; // single / layout / both
+  const singleBlob = await canvasToBlob(out, 'image/jpeg', 0.95);
+  const singleName = `${stripExt(safeName(file.name)) || '证件照'}_${tpl.label}.jpg`;
+
+  onProgress(0.85, '生成输出');
+
+  const stats: Record<string, any> = {
+    模板: tpl.label, 尺寸: `${tw}×${th}px`,
+    换底: bgMode === 'keep' ? '保留原色' : bgMode === 'white' ? '白色' : bgMode === 'blue' ? '蓝色 (#438EDB)' : bgMode === 'red' ? '红色 (#D9383E)' : bgMode === 'gradient' ? '渐变蓝' : `自定义 ${options.customColor || ''}`,
+    输出模式: mode === 'single' ? '单张' : mode === 'layout' ? '6张拼版' : '单张+拼版 ZIP',
+  };
+
+  if (mode === 'single') {
+    return {
+      blob: singleBlob, ext: 'jpg', fileName: stripExt(singleName),
+      preview: { stats, thumbnails: [out.toDataURL('image/jpeg', 0.6)] },
+    };
+  }
+
+  // === 6 张 2×3 拼版（A4 局部，保持简单：2列 3 行，图片间留 2mm 约 2px 留白）===
+  const gap = 6;
+  const layoutW = tw * 2 + gap * 3;
+  const layoutH = th * 3 + gap * 4;
+  const layout = document.createElement('canvas');
+  layout.width = layoutW; layout.height = layoutH;
+  const lctx = layout.getContext('2d')!;
+  lctx.fillStyle = '#ffffff';
+  lctx.fillRect(0, 0, layoutW, layoutH);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 2; c++) {
+      const dx = gap + c * (tw + gap);
+      const dy = gap + r * (th + gap);
+      lctx.drawImage(out, dx, dy, tw, th);
+    }
+  }
+  const layoutBlob = await canvasToBlob(layout, 'image/jpeg', 0.95);
+  const layoutName = `${stripExt(safeName(file.name)) || '证件照'}_6张拼版.jpg`;
+
+  if (mode === 'layout') {
+    return {
+      blob: layoutBlob, ext: 'jpg', fileName: stripExt(layoutName),
+      preview: { stats, thumbnails: [layout.toDataURL('image/jpeg', 0.4)] },
+    };
+  }
+  // both → zip
+  const zip = new JSZip();
+  zip.file(singleName, singleBlob);
+  zip.file(layoutName, layoutBlob);
+  const buf = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+  onProgress(1);
+  return {
+    blob: buf, ext: 'zip', fileName: 'MendFile_证件照单张+拼版',
+    preview: { stats, thumbnails: [out.toDataURL('image/jpeg', 0.5), layout.toDataURL('image/jpeg', 0.3)] },
   };
 };

@@ -55,20 +55,27 @@ export default function ToolPageTemplate({
               ))}
             </ul>
           </div>
-          <div className="card p-5 border-amber-200/70 bg-amber-50/30">
-            <h3 className="font-semibold text-amber-800 mb-3 inline-flex items-center gap-2">
-              <span className="w-6 h-6 rounded-md bg-amber-500 text-white text-xs grid place-items-center">!</span>
-              功能边界与免责提示
-            </h3>
-            <ul className="space-y-2 text-sm text-amber-900/80">
-              {config.boundaries.map((b, i) => (
-                <li key={i} className="flex gap-2">
-                  <span>▸</span>
-                  <span>{b}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {(() => {
+            const isRed = config.boundaryCardStyle === 'red';
+            return (
+              <div className={`card p-5 ${isRed ? 'border-red-200/90 bg-red-50/40' : 'border-amber-200/70 bg-amber-50/30'}`}>
+                <h3 className={`font-semibold mb-3 inline-flex items-center gap-2 ${isRed ? 'text-red-800' : 'text-amber-800'}`}>
+                  <span className={`w-6 h-6 rounded-md text-white text-xs grid place-items-center ${isRed ? 'bg-red-500' : 'bg-amber-500'}`}>
+                    {isRed ? '⚠️' : '!'}
+                  </span>
+                  {isRed ? '⚠️ 合规提示 · 功能边界与免责声明' : '功能边界与免责提示'}
+                </h3>
+                <ul className={`space-y-2 text-sm ${isRed ? 'text-red-900/80' : 'text-amber-900/80'}`}>
+                  {config.boundaries.map((b, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span>▸</span>
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
         </section>
 
         {/* SEO 长文本段落：为收录提供足量关键词内容 */}
@@ -211,7 +218,8 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
   };
 
   const start = async () => {
-    if (!files.length) {
+    const needFile = config.fileRequired !== false;
+    if (needFile && !files.length) {
       setErrors(['请先选择至少一个文件']);
       return;
     }
@@ -266,20 +274,26 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
 
   // 进度条百分比
   const pct = Math.min(100, Math.round(progress * 100));
+  const needFile = config.fileRequired !== false;
+  const startBtnLabel = needFile
+    ? (running ? '处理中…' : `⚙️ 开始处理（输出 .${config.outputExt}）`)
+    : (running ? '计算中…' : `✨ 开始生成 / 计算（输出 .${config.outputExt}）`);
 
   return (
     <div className="space-y-6">
-      {/* 上传区 */}
-      <DropZone
-        accept={config.accept}
-        multiple={config.multiple}
-        disabled={running}
-        onFiles={onFilesChosen}
-        inputRef={inputRef}
-      />
+      {/* 上传区（fileRequired=false 时隐藏，如工时计算、密码生成、单位换算等） */}
+      {needFile && (
+        <DropZone
+          accept={config.accept}
+          multiple={config.multiple}
+          disabled={running}
+          onFiles={onFilesChosen}
+          inputRef={inputRef}
+        />
+      )}
 
       {/* 文件列表 */}
-      {!!files.length && (
+      {needFile && !!files.length && (
         <FileList
           config={config}
           files={files}
@@ -341,7 +355,7 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
               </span>
             ) : (
               <span>
-                {output ? '✅ 处理完成' : errors.length ? '⚠️ 处理异常' : `准备就绪，共 ${files.length} 个文件`}
+                {output ? '✅ 处理完成' : errors.length ? '⚠️ 处理异常' : (needFile ? `准备就绪，共 ${files.length} 个文件` : '准备就绪，配置参数后点击开始')}
               </span>
             )}
           </div>
@@ -366,23 +380,27 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
         <div className="flex flex-wrap gap-2">
           <button
             className="btn-primary"
-            disabled={!files.length || running}
+            disabled={running || (needFile && !files.length)}
             onClick={start}
           >
-            {running ? '处理中…' : `⚙️ 开始处理（输出 .${config.outputExt}）`}
+            {startBtnLabel}
           </button>
           {running ? (
             <button className="btn-secondary" onClick={cancel}>取消</button>
           ) : (
-            <button className="btn-secondary" onClick={clearFiles} disabled={!files.length}>
-              清空文件
-            </button>
+            needFile && (
+              <button className="btn-secondary" onClick={clearFiles} disabled={!files.length}>
+                清空文件
+              </button>
+            )
           )}
         </div>
         <div className="flex gap-2 items-center">
-          <div className="text-xs text-slate-500 hidden sm:inline">
-            总大小：{formatBytes(files.reduce((s, f) => s + f.size, 0))}
-          </div>
+          {needFile && (
+            <div className="text-xs text-slate-500 hidden sm:inline">
+              总大小：{formatBytes(files.reduce((s, f) => s + f.size, 0))}
+            </div>
+          )}
           <button
             className="btn-primary !bg-emerald-600 hover:!bg-emerald-700"
             disabled={!output}
@@ -910,6 +928,142 @@ function OptionsPanel(props: {
       </div>
     ),
     'pdf-merge': <div className="text-sm text-slate-500">提示：上传多个文件后，可在上方列表使用「↑ / ↓」调整合并顺序。</div>,
+
+    /* =====================================
+     *  二期 · 批次 1 · 图片工具参数面板
+     * ===================================== */
+    'image-compress': (
+      <div className="space-y-3">
+        <Field label="压缩档位">
+          <div className="flex flex-wrap gap-3 sm:gap-4">
+            {[
+              { k: 'light', label: '轻度压缩（85%）', desc: '视觉无损，体积 ↓10~25%' },
+              { k: 'normal', label: '⚑ 标准压缩（70%）', desc: '推荐，体积 ↓30~50%' },
+              { k: 'extreme', label: '极致压缩（45%+缩放）', desc: '体积 ↓60~80%，最长边≤1920px' },
+            ].map((r) => (
+              <label key={r.k} className="inline-flex items-start gap-2 text-sm cursor-pointer p-2.5 rounded-lg border border-slate-200 hover:border-brand-400 bg-white w-full sm:w-auto sm:min-w-[220px]">
+                <input type="radio" name={`compress-${toolKey}`} value={r.k}
+                  checked={options.level === r.k} disabled={disabled}
+                  onChange={() => update({ level: r.k })} />
+                <div>
+                  <div className="font-medium text-slate-800">{r.label}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">{r.desc}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </Field>
+        <div className="text-xs text-slate-500 bg-slate-100/60 rounded-lg p-3 leading-5">
+          💡 <strong>使用建议</strong>：日常办公文档插图 → 推荐「标准压缩」；发送邮件、网页上传等对体积极其敏感的场景 → 选择「极致压缩」；对画质要求高（摄影作品、海报）请选择「轻度压缩」。
+        </div>
+      </div>
+    ),
+    'image-convert': (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <Field label="输出格式">
+          <select className="input" disabled={disabled} value={options.format}
+            onChange={(e) => update({ format: e.target.value })}>
+            <option value="same">保持原格式（默认）</option>
+            <option value="jpg">JPG（体积小，通用）</option>
+            <option value="png">PNG（无损，支持透明）</option>
+            <option value="webp">WebP（新一代，更小更高清）</option>
+            <option value="bmp">BMP（位图无压缩）</option>
+          </select>
+        </Field>
+        <Field label={`压缩质量 (${Number(options.quality ?? 85)}%)`} hint="仅在输出 JPG / WebP 时生效，PNG/BMP 无损格式会忽略此参数">
+          <input type="range" min={10} max={100} step={1}
+            value={options.quality ?? 85}
+            disabled={disabled}
+            onChange={(e) => update({ quality: Number(e.target.value) })} />
+          <div className="flex justify-between text-[11px] text-slate-400 mt-1">
+            <span>10% 最小</span><span>100% 最佳画质</span>
+          </div>
+        </Field>
+        <Field label="透明填充颜色" hint="当 PNG(透明) → JPG/BMP 时，透明区域将被此颜色填充（其他转换不受影响）">
+          <div className="flex items-center gap-2">
+            <input type="color" className="h-10 w-14 rounded-lg border border-slate-200 bg-white cursor-pointer"
+              value={options.fillColor || '#ffffff'}
+              disabled={disabled}
+              onChange={(e) => update({ fillColor: e.target.value })} />
+            <input type="text" className="input flex-1 font-mono text-xs"
+              value={options.fillColor || '#ffffff'}
+              disabled={disabled}
+              onChange={(e) => update({ fillColor: e.target.value })} />
+          </div>
+        </Field>
+      </div>
+    ),
+    'id-photo': (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="尺寸模板">
+            <select className="input" disabled={disabled} value={options.template}
+              onChange={(e) => update({ template: e.target.value })}>
+              <option value="1inch">一寸（295×413px · 25×35mm）</option>
+              <option value="2inch">二寸（413×579px · 35×49mm）</option>
+              <option value="small1inch">小一寸（260×378px）</option>
+              <option value="small2inch">小二寸（413×531px）</option>
+              <option value="big1inch">大一寸（390×567px）</option>
+              <option value="passport">护照签证（390×567px）</option>
+              <option value="custom">自定义宽高（下两栏填写）</option>
+            </select>
+          </Field>
+          <Field label="自定义 宽度(px)" hint="仅在「自定义」模板生效">
+            <input type="number" min={100} max={2400} className="input"
+              value={options.customW ?? 295} disabled={disabled}
+              onChange={(e) => update({ customW: Number(e.target.value) })} />
+          </Field>
+          <Field label="自定义 高度(px)" hint="仅在「自定义」模板生效">
+            <input type="number" min={100} max={3600} className="input"
+              value={options.customH ?? 413} disabled={disabled}
+              onChange={(e) => update({ customH: Number(e.target.value) })} />
+          </Field>
+          <Field label="输出模式">
+            <select className="input" disabled={disabled} value={options.output}
+              onChange={(e) => update({ output: e.target.value })}>
+              <option value="single">仅单张证件照</option>
+              <option value="layout">仅 6 张 2×3 拼版</option>
+              <option value="both">单张 + 拼版，打包 ZIP</option>
+            </select>
+          </Field>
+        </div>
+        <Field label="更换背景色（默认保留原图背景）">
+          <div className="flex flex-wrap gap-3 sm:gap-4">
+            {[
+              { k: 'keep', label: '保留原色', swatch: 'linear-gradient(45deg,#e5e7eb 25%,transparent 25%,transparent 75%,#e5e7eb 75%),linear-gradient(45deg,#e5e7eb 25%,#ffffff 25%,#ffffff 75%,#e5e7eb 75%)', swatchText: '原图' },
+              { k: 'white', label: '白色', swatch: '#ffffff', swatchText: '白' },
+              { k: 'blue', label: '蓝色 #438EDB', swatch: '#438EDB', swatchText: '蓝' },
+              { k: 'red', label: '红色 #D9383E', swatch: '#D9383E', swatchText: '红' },
+              { k: 'gradient', label: '渐变蓝（渐变背景）', swatch: 'linear-gradient(180deg,#438EDB,#8edef7)', swatchText: '渐' },
+              { k: 'custom', label: '自定义颜色（右方选择）', swatch: '#ffffff', swatchText: '自' },
+            ].map((r) => (
+              <label key={r.k} className="inline-flex items-center gap-2 text-sm cursor-pointer p-2 rounded-lg border border-slate-200 bg-white">
+                <input type="radio" name={`bg-${toolKey}`} value={r.k}
+                  checked={options.bgMode === r.k} disabled={disabled}
+                  onChange={() => update({ bgMode: r.k })} />
+                <span className="inline-block w-7 h-7 rounded border border-slate-300 grid place-items-center text-[10px] text-slate-700"
+                  style={{ background: r.swatch }}>{r.swatchText}</span>
+                <span>{r.label}</span>
+              </label>
+            ))}
+            <div className="inline-flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-white">
+              <div className="text-xs text-slate-500 mr-1">自定义值：</div>
+              <input type="color" className="h-9 w-10 rounded border border-slate-200 bg-white"
+                value={options.customColor || '#ffffff'}
+                disabled={disabled}
+                onChange={(e) => update({ customColor: e.target.value, bgMode: 'custom' })} />
+              <input type="text" className="input font-mono text-xs !py-1 !h-9 !w-[100px]"
+                value={options.customColor || '#ffffff'}
+                disabled={disabled}
+                onChange={(e) => update({ customColor: e.target.value })} />
+            </div>
+          </div>
+        </Field>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 leading-5">
+          ⚠️ <strong>合规提示：</strong>本工具采用纯 Canvas 颜色阈值换底，<strong>不是 AI 人像分割</strong>。正式证件（身份证/护照/签证）请务必前往专业照相馆，本工具仅适合日常临时使用。
+        </div>
+      </div>
+    ),
   };
 
   if (!panels[toolKey]) return null;

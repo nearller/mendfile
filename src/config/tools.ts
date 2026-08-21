@@ -11,8 +11,10 @@ export type ToolCategory =
   | 'organize' // 整理编辑
   | 'watermark' // 水印安全
   | 'optimize' // 轻量化优化
-  | 'qr' // 二维码（预留）
-  | 'image'; // 图片工具（预留）
+  | 'qr' // 二维码工具
+  | 'image' // 图片工具全集
+  | 'media' // 多媒体轻量工具（二期新增）
+  | 'office'; // 办公小工具合集（二期新增）
 
 export interface ToolConfig {
   key: string;
@@ -40,6 +42,10 @@ export interface ToolConfig {
   processor: ProcessFn<any, any>;
   /** 页面是否需要预览区（除纯文本等） */
   showPreview: boolean;
+  /** 工具是否需要上传文件（默认 true）：false 时隐藏上传区+文件列表，直接显示参数面板+结果区 */
+  fileRequired?: boolean;
+  /** 边界提示卡片样式：'amber'(默认黄) / 'red'(红警告，用于合规高风险类如AI抠图/证件照) */
+  boundaryCardStyle?: 'amber' | 'red';
 }
 
 export const CATEGORY_META: Record<ToolCategory, { name: string; desc: string; color: string }> = {
@@ -47,8 +53,10 @@ export const CATEGORY_META: Record<ToolCategory, { name: string; desc: string; c
   organize: { name: 'PDF整理编辑', desc: '合并、拆分、旋转、裁剪、调序', color: 'from-violet-500 to-indigo-600' },
   watermark: { name: '水印与安全', desc: '去水印、加水印、加密解密', color: 'from-rose-500 to-pink-600' },
   optimize: { name: '轻量化优化', desc: '压缩、加页码、元数据修改', color: 'from-emerald-500 to-teal-600' },
-  qr: { name: '二维码工具', desc: '二维码生成、解码、批量（敬请期待）', color: 'from-amber-500 to-orange-600' },
-  image: { name: '图片长图工具', desc: '长图拼接、图片编辑、格式互转（敬请期待）', color: 'from-fuchsia-500 to-purple-600' },
+  qr: { name: '二维码工具', desc: '二维码生成、美化、批量解析、批量生成打包', color: 'from-amber-500 to-orange-600' },
+  image: { name: '图片长图工具', desc: '图片压缩、格式互转、证件照、拼接、抠图、加水印', color: 'from-fuchsia-500 to-purple-600' },
+  media: { name: '多媒体轻量工具', desc: '视频压缩裁剪格式转换、音频压缩裁剪格式转换', color: 'from-cyan-500 to-blue-500' },
+  office: { name: '办公小工具合集', desc: '文本批量处理、工时/时间戳/密码生成/单位换算', color: 'from-lime-500 to-green-600' },
 };
 
 export const TOOLS_CONFIG: Record<string, ToolConfig> = {
@@ -402,6 +410,105 @@ export const TOOLS_CONFIG: Record<string, ToolConfig> = {
     defaultOptions: { title: '', author: '', subject: '', keywords: '', creator: 'MendFile.com', clear: false },
     processor: P.pdfMetadata,
     showPreview: false,
+  },
+
+  /* =====================================
+   *  二期 · 批次 1 · 图片工具全集
+   * ===================================== */
+  'image-compress': {
+    key: 'image-compress',
+    path: '/tools/image-compress',
+    name: '图片批量压缩',
+    shortDesc: '三档压缩（轻度/标准/极致），批量处理 JPG/PNG/WebP，体积最大减少 80%',
+    category: 'image',
+    icon: '🗜️',
+    title: '图片压缩在线 批量JPG PNG WebP - MendFile 全能办公工具',
+    description: 'MendFile 图片压缩在线工具支持 JPG、PNG、WebP 三种格式批量压缩，三档模式任选（轻度/标准/极致），纯前端浏览器本地处理，文件不上传服务器，单张输出或批量打包 ZIP 下载。',
+    keywords: ['图片压缩在线', '图片批量压缩', 'jpg压缩', 'png压缩', 'webp压缩', '免费图片压缩', '图片压缩不改变尺寸', '手机图片压缩'],
+    features: [
+      '三档压缩模式：轻度（85%视觉无损）/ 标准（70%推荐，体积↓30~50%）/ 极致（45%+最长边1920px缩放，体积↓60~80%）',
+      '支持 JPG / PNG / WebP 全覆盖，批量上传多文件一键处理',
+      '实时显示每张压缩前后大小与总压缩率，一目了然',
+      '全程浏览器本地运行，您的照片绝不上传任何服务器',
+    ],
+    boundaries: [
+      '已经压缩过的图片再次压缩收益有限，不建议重复操作',
+      'GIF 动图、SVG 矢量图、ICO 图标格式暂不支持（未来将在独立 GIF 工具上线）',
+      '超过 4K 分辨率的超大单张图片在低端手机上可能需要较长时间',
+    ],
+    accept: 'image/jpeg,image/png,image/webp',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_图片压缩结果',
+    defaultOptions: { level: 'normal' }, // light | normal | extreme
+    processor: P.imageCompress,
+    showPreview: true,
+  },
+  'image-convert': {
+    key: 'image-convert',
+    path: '/tools/image-convert',
+    name: '图片格式互转',
+    shortDesc: 'JPG / PNG / WebP / BMP 批量互转，透明通道 PNG 转 JPG 自动填充底色',
+    category: 'image',
+    icon: '🔄',
+    title: '图片格式互转 JPG转PNG转WebP - MendFile 全能办公工具',
+    description: 'MendFile 图片格式互转工具支持 JPG、PNG、WebP、BMP 四种位图格式批量转换，PNG 透明图转 JPG 可自定义底色，质量参数可调，纯前端本地转换无泄露。',
+    keywords: ['图片格式转换', 'jpg转png', 'jpg转webp', 'png转jpg', '批量图片格式转换', 'png转webp', 'webp转jpg', 'bmp转jpg'],
+    features: [
+      '支持 JPG / PNG / WebP / BMP 四种常见位图格式互转，默认保持原格式',
+      'JPG 与 WebP 提供质量滑块 10~100 自定义压缩比',
+      'PNG 转 JPG/BMP 透明通道自动填充背景色（可自定义填充颜色，默认纯白）',
+      '多文件打包 ZIP 下载，单文件直接输出；全程本地不联网',
+    ],
+    boundaries: [
+      'SVG 矢量图、GIF 动图、ICO、AVIF 等非位图格式暂不支持',
+      '带透明通道 PNG 转无透明格式时，透明区域会被填充底色，这是格式特性',
+    ],
+    accept: 'image/jpeg,image/png,image/webp,image/bmp',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_图片格式转换结果',
+    defaultOptions: { format: 'same', quality: 85, fillColor: '#ffffff' },
+    processor: P.imageConvert,
+    showPreview: true,
+  },
+  'id-photo': {
+    key: 'id-photo',
+    path: '/tools/id-photo',
+    name: '智能证件照工具',
+    shortDesc: '一寸二寸等 6 种模板一键裁切，支持白/蓝/红/渐变/自定义 5 种换底，附 6 张拼版',
+    category: 'image',
+    icon: '🪪',
+    title: '智能证件照 换底色 一寸二寸模板 - MendFile 全能办公工具',
+    description: 'MendFile 智能证件照工具提供一寸、二寸、小一寸、小二寸、大一寸、护照签证等 6 种标准尺寸模板，支持一键更换背景色（白/蓝/红/渐变蓝/自定义），纯前端 Canvas 颜色阈值换底不上传，附带 6 张可打印拼版。',
+    keywords: ['证件照换底色', '一寸证件照', '二寸证件照', '证件照制作', '护照签证照片', '证件照蓝色背景', '证件照红色背景', '证件照电子版制作'],
+    features: [
+      '6 套标准尺寸模板一键切换 + 自定义宽高像素级精准控制',
+      '5 种换底模式：保留原色 / 白色 / 蓝色 (#438EDB) / 红色 (#D9383E) / 渐变蓝 / 自定义颜色',
+      '自动按模板比例居中裁剪，边缘羽化 2px 避免硬边',
+      '3 种输出模式：单张 JPG / 6 张 2×3 拼版 JPG / 两者打包 ZIP 直接打印',
+    ],
+    boundaries: [
+      '⚠️ 本工具为普通颜色阈值换底算法（基于 Canvas 色差替换），并非 AI 人像分割；与专业 AI 抠图服务存在精度差异',
+      '⚠️ 对于复杂背景（非纯色墙面）、卷发边缘、透明/纱质衣物、前景色与底色相近的照片，可能出现边缘残留或误替换',
+      '⚠️ 身份证、护照、签证、考试报名等正式证件请务必使用专业照相馆拍摄，本工具仅适合临时日常场景、简历、打印小样等非正式用途',
+      '⚠️ 本工具不提供人脸识别、人像提取、自动对齐肩线等高级能力，请自行保证人像位置与构图符合证件规范',
+    ],
+    boundaryCardStyle: 'red',
+    accept: 'image/jpeg,image/png,image/webp',
+    multiple: false,
+    outputExt: 'jpg',
+    outputFileName: 'MendFile_证件照结果',
+    defaultOptions: {
+      template: '1inch',
+      customW: 295,
+      customH: 413,
+      bgMode: 'keep', // keep | white | blue | red | gradient | custom
+      customColor: '#ffffff',
+      output: 'single', // single | layout | both
+    },
+    processor: P.idPhoto,
+    showPreview: true,
   },
 };
 

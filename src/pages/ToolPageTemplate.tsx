@@ -6,6 +6,8 @@ import { formatBytes, generatePdfThumbnail, readAsArrayBuffer, readAsDataURL, do
 import { pdfjsLib } from '@/core/pdfjs';
 import AdSlot from '@/components/AdSlot';
 import type { ProcessOutput } from '@/core/types';
+// 批次 6 · 云端增强模式提示条（仅架构预留）
+import { CloudModeHintStrip, CloudBannerEntry } from '@/components/CloudReserve';
 
 export default function ToolPageTemplate({
   toolKey,
@@ -281,6 +283,13 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
 
   return (
     <div className="space-y-6">
+      {/* 批次 6 · 云端增强模式提示（仅开关开启时显示；当前为架构预留，仍纯本地处理） */}
+      <CloudModeHintStrip />
+      {/* 工具页紧凑云端入口 + 工具信息右上小徽章 */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div />
+        <CloudBannerEntry compact />
+      </div>
       {/* 上传区（fileRequired=false 时隐藏，如工时计算、密码生成、单位换算等） */}
       {needFile && (
         <DropZone

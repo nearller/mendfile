@@ -64,7 +64,15 @@ export default function SiteFooter() {
             <Link to="/disclaimer">免责声明</Link>
             <Link to="/privacy">隐私说明</Link>
             <a href="mailto:contact@mendfile.com">联系我们</a>
-            <span className="text-slate-400">ICP备案号（请上线后自行替换）</span>
+            <a
+              href="https://beian.miit.gov.cn/"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="hover:text-brand-600"
+              title="点击前往工信部 ICP/IP 地址/域名信息备案管理系统查询"
+            >
+              鄂ICP备2026045053号-1
+            </a>
             {/* 不蒜子极简访问量计数器（纯前端、无Cookie，DOM id 与官方脚本约定一致） */}
             <span className="hidden sm:inline-flex items-center gap-2 text-slate-500 text-xs" aria-label="访问量统计">
               <span className="chip !py-0.5">

@@ -631,6 +631,205 @@ export const TOOLS_CONFIG: Record<string, ToolConfig> = {
     processor: P.qrParse,
     showPreview: true,
   },
+
+  // =======================================================
+  // 批次 3 · 图片剩余功能补齐（image 分类扩展至 8 工具）
+  // =======================================================
+  'image-watermark': {
+    key: 'image-watermark',
+    path: '/tools/image-watermark',
+    name: '图片批量加水印',
+    shortDesc: '批量为图片添加文字/图片水印，支持平铺密集防盗、四角+居中、透明度/旋转/颜色自由调节',
+    category: 'image',
+    icon: '💧',
+    title: '图片批量加水印 免费在线文字图片水印 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线图片批量加水印工具，纯前端本地处理，支持平铺密集防盗水印、四角+居中、单图+图片 Logo 叠加两种水印方式，透明度、旋转角度、字体、大小、颜色自由调节，批量处理 ZIP 打包下载，文件不上传服务器。',
+    keywords: ['图片批量加水印', '在线加水印免费', '平铺防盗水印', '批量图片Logo加水印', '透明水印生成', '图片水印工具'],
+    features: [
+      '批量上传图片，一次处理最多 200 张，自动 ZIP 打包下载，文件名带 _wmark 后缀',
+      '文字水印：自定义内容、字体大小、颜色、透明度、旋转角度，支持多行输入',
+      '图片水印：上传 Logo/印章，支持保持宽高比、自定义宽度、居中缩放',
+      '3 大布局：平铺密集（防盗）/ 居中单张 / 四角+中央 5 处水印，满足不同使用场景',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地处理，所有图片与水印内容均在浏览器完成，绝不上传服务器或第三方服务',
+      '⚠️ 单张过大图片（≥50MB）建议分批压缩后再加水印，以避免浏览器内存占用过高',
+      '⚠️ 请勿对他人图像添加恶意水印，使用者须自负版权相关法律责任',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'image/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_批量加水印结果',
+    defaultOptions: {
+      mode: 'text', // text | image
+      text: '© MendFile.com',
+      fontSize: 32,
+      color: '#111827',
+      opacity: 0.28,
+      rotation: -30,
+      layout: 'tile', // tile | center | corners
+      padding: 60, // 水印与边缘距离/平铺间距
+      fontFamily: 'system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif',
+      imageDataURL: '', // 图片水印 dataUrl
+      imageWidthRatio: 0.18, // 图片水印相对图片宽度比例
+      outputFormat: 'same', // same | jpg | png
+      quality: 92,
+    },
+    processor: P.imageWatermark,
+    showPreview: true,
+  },
+  'image-stitch': {
+    key: 'image-stitch',
+    path: '/tools/image-stitch',
+    name: '长图拼接工具',
+    shortDesc: '多张图片一键拼接成长图，支持纵向、横向、2 列网格、自定义间距、背景色',
+    category: 'image',
+    icon: '🧵',
+    title: '长图拼接 多图合一 纵向横向网格 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线长图拼接工具，纯前端本地处理，支持纵向拼接（聊天记录/长截图）、横向拼接（对比图）、2 列网格拼图（九宫格等），自定义间距像素与背景色，自动等宽或等高对齐。',
+    keywords: ['长图拼接在线', '多图合成长图', '图片拼接工具', '九宫格拼图', '聊天记录拼接', '截图拼接工具'],
+    features: [
+      '纵向 / 横向 / 2 列网格 3 种模式，满足聊天记录、产品对比、朋友圈九宫格等常见场景',
+      '自定义拼接间距（0~200px）、背景色（白/透明/自选色），圆角间距更美观',
+      '纵向模式自动等宽、横向模式自动等高，无需手动调整尺寸',
+      '批量 100 张以内一次性拼接完成，输出 PNG / JPG，JPG 可调质量',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地拼接，所有图片在浏览器内存中合成，不经过任何服务器',
+      '⚠️ 大量大图拼接时输出文件尺寸可能很大，请控制图片数量与分辨率',
+      '⚠️ 纵向模式下若图片宽度差异巨大（如手机截图 vs 摄影图）建议先统一调整宽度再拼接',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'image/*',
+    multiple: true,
+    outputExt: 'jpg',
+    outputFileName: 'MendFile_长图拼接结果',
+    defaultOptions: {
+      direction: 'vertical', // vertical | horizontal | grid2
+      gap: 8, // 0~200 px
+      bgColor: '#ffffff',
+      bgTransparent: false,
+      outputFormat: 'jpg',
+      quality: 92,
+    },
+    processor: P.imageStitch,
+    showPreview: true,
+  },
+  'image-split': {
+    key: 'image-split',
+    path: '/tools/image-split',
+    name: '图片分割工具',
+    shortDesc: '一键按网格/行/列等分图片，支持自定义行列数、重叠像素，ZIP 打包输出',
+    category: 'image',
+    icon: '✂️',
+    title: '图片分割 网格等分 行列自定义 九宫格切图 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线图片分割工具，纯前端本地处理，支持按网格（九宫格等）、仅横向等分、仅纵向等分三种方式，自定义行列数（2~12）、重叠像素（避免地图/全景图边缘接缝），ZIP 打包输出所有切片。',
+    keywords: ['图片分割在线', '九宫格切图', '图片等分切割', '长图分段切割', '朋友圈九宫格切片', '网格等分图片'],
+    features: [
+      '网格 / 仅横向等分（rows）/ 仅纵向等分（cols）3 种模式',
+      '行列支持 2~12 自由配置，支持重叠像素（0~80px）消除地图、漫画、全景拼接间隙',
+      '保持原格式或统一输出 PNG / JPG，单张图片分割后自动 ZIP 打包',
+      '批量多图分割自动命名（前缀_r1c1、_r1c2…），批量处理每图一份 ZIP',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地分割，原图与切片均不离开浏览器；批量大图建议分批',
+      '⚠️ 行列数越大单个切片越小，若原图像素过低，切出后可能模糊',
+      '⚠️ 长图等分前建议先压缩到 30MB 以内，以获得更流畅的体验',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'image/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_图片分割结果',
+    defaultOptions: {
+      mode: 'grid', // grid | rows | cols
+      rows: 3,
+      cols: 3,
+      overlap: 0, // 0~80 px
+      outputFormat: 'same', // same | png | jpg
+      quality: 92,
+    },
+    processor: P.imageSplit,
+    showPreview: true,
+  },
+  'image-edit': {
+    key: 'image-edit',
+    path: '/tools/image-edit',
+    name: '图片旋转裁剪',
+    shortDesc: '批量图片旋转、左右上下镜像翻转、自定义四边像素/百分比裁剪、统一输出',
+    category: 'image',
+    icon: '🔄',
+    title: '图片旋转裁剪 批量镜像翻转 自定义四边裁剪 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线图片旋转裁剪工具，纯前端本地处理，支持 90°/180°/270°/自定义任意角度旋转、左右/上下镜像翻转、自定义四边像素裁剪（或百分比裁剪），批量多图处理 ZIP 打包。',
+    keywords: ['图片旋转在线', '批量裁剪图片', '图片镜像翻转', '自定义四边裁剪', '照片翻转工具', 'JPG 旋转 EXIF'],
+    features: [
+      '旋转：90° 顺时针 / 180° / 逆时针 90° / 自定义角度（-180°~180°），自动扩充画布避免裁切',
+      '翻转：支持水平镜像、垂直镜像、同时翻转',
+      '裁剪：按像素值或百分比独立设置上/下/左/右四边裁剪，可组合使用',
+      '批量多张同时处理，保持原格式或统一 PNG/JPG 输出，ZIP 下载',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地编辑，批量大尺寸图建议分批操作避免卡顿',
+      '⚠️ 自定义大角度斜切旋转后，四周自动填充白色/透明背景，画面可能出现空白边',
+      '⚠️ 本工具不做 EXIF 旋转矫正处理（Canvas 解码时浏览器通常已自动应用），若有旋转异常请先确认原图',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'image/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_图片旋转裁剪结果',
+    defaultOptions: {
+      rotate: 0, // 0, 90, 180, 270, 或任意角度
+      flipH: false,
+      flipV: false,
+      cropUnit: 'pixel', // pixel | percent
+      cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0,
+      outputFormat: 'same', // same | jpg | png
+      quality: 92,
+    },
+    processor: P.imageEdit,
+    showPreview: true,
+  },
+  'image-removebg': {
+    key: 'image-removebg',
+    path: '/tools/image-removebg',
+    name: '前端轻量 AI 抠图工具',
+    shortDesc: '纯 Canvas 颜色容差法一键替换背景为透明/纯色，支持羽化边缘（合规标注：非真实神经网络 AI 抠图）',
+    category: 'image',
+    icon: '🪄',
+    title: 'AI 抠图工具 去背景变透明 - MendFile 全能办公工具（合规标注：纯Canvas容差法非神经网络）',
+    description: 'MendFile 免费在线前端轻量抠图工具，纯前端本地处理，采用纯 Canvas Flood Fill 颜色容差算法一键抠除纯色/纯色+轻度渐变背景，可调容差与羽化。⚠️ 【合规提示】本工具并非基于深度学习或神经网络的 AI 抠图，不调用任何云端抠图模型，不适合复杂背景、发丝、婚纱、玻璃、高反光等场景。',
+    keywords: ['在线AI抠图', '去背景变透明', '纯色背景抠图', '证件照换底备用', '透明PNG生成', '前端抠图'],
+    features: [
+      '一键 Flood Fill 颜色容差抠图：自动从 4 角 + 4 边选取背景色，按容差阈值移除',
+      '可调容差阈值（0~255）与边缘羽化（0~10px），获得柔和不扎眼的边缘',
+      '可选输出透明 PNG、或叠加自定义背景色输出 JPG',
+      '批量多图处理，全部在浏览器内计算，不调用任何云端模型、不上传文件',
+    ],
+    boundaries: [
+      '⚠️ 【核心合规提示】本工具不是基于深度学习 / 神经网络的 AI 抠图，仅使用纯 Canvas Flood Fill 颜色容差法，效果远不如专业付费云端抠图服务',
+      '⚠️ 仅适合人像主体 + 纯色墙面 / 纯色 + 轻度渐变背景 / 白底产品图。发丝、婚纱、半透明、高反光、复杂图案背景、前景色与背景色接近等场景均会出现严重边缘残留或误扣',
+      '⚠️ 身份证、护照、签证、考试报名、正式证件照等用途请务必使用专业照相馆或知名商用抠图服务，本工具不保证结果符合标准',
+      '⚠️ 纯前端本地处理，不存储、不上传用户任何图片数据，但大尺寸（≥ 4000 像素）图像可能占用较高内存，建议使用 2000 像素以内图像',
+      '⚠️ 本功能定位为"快速临时轻量抠图"，不承担任何因抠图质量不佳导致的业务损失',
+    ],
+    boundaryCardStyle: 'red',
+    accept: 'image/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_抠图结果',
+    defaultOptions: {
+      threshold: 28, // 0~255 颜色容差
+      feather: 2, // 0~10 像素边缘羽化
+      outputMode: 'transparent', // transparent | custom-color
+      customBgColor: '#ffffff',
+      outputFormat: 'png', // png | jpg
+      quality: 92,
+    },
+    processor: P.imageRemoveBg,
+    showPreview: true,
+  },
 };
 
 export const TOOL_ROUTES = Object.values(TOOLS_CONFIG).map((t) => ({ key: t.key, path: t.path }));

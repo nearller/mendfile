@@ -1159,6 +1159,426 @@ function OptionsPanel(props: {
         </div>
       </div>
     ),
+
+    /* =====================================
+     *  二期 · 批次 3 · 图片补齐参数面板
+     * ===================================== */
+    'image-watermark': (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="水印模式">
+            <select className="input" disabled={disabled} value={options.mode || 'text'}
+              onChange={(e) => update({ mode: e.target.value })}>
+              <option value="text">文字水印（可多行）</option>
+              <option value="image">图片水印 / Logo</option>
+            </select>
+          </Field>
+          <Field label="布局方式">
+            <select className="input" disabled={disabled} value={options.layout || 'tile'}
+              onChange={(e) => update({ layout: e.target.value })}>
+              <option value="tile">平铺密集（防盗水印）</option>
+              <option value="center">居中单张</option>
+              <option value="corners">四角 + 居中（共 5 处）</option>
+            </select>
+          </Field>
+          <Field label={`透明度 ${Math.round((options.opacity ?? 0.28) * 100)}%`} hint="建议防盗水印 15~35%，居中署名 60~90%">
+            <input type="range" min={0.02} max={1} step={0.01}
+              value={options.opacity ?? 0.28}
+              disabled={disabled}
+              onChange={(e) => update({ opacity: Number(e.target.value) })} />
+          </Field>
+          <Field label="旋转角度 (°)" hint="平铺模式建议 -30° 或 45° 交错更美观">
+            <input type="number" className="input"
+              value={options.rotation ?? -30}
+              disabled={disabled}
+              onChange={(e) => update({ rotation: Number(e.target.value) })} />
+          </Field>
+        </div>
+        {options.mode === 'image' ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <Field label="上传水印图片（Logo）" colSpan={2} hint="推荐透明 PNG、白底 JPG 亦可；过大建议先压缩">
+              <input type="file" accept="image/png,image/jpeg,image/webp" className="input" disabled={disabled}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0]; if (!f) return;
+                  const url = await readAsDataURL(f);
+                  update({ imageDataURL: url });
+                }} />
+              {options.imageDataURL ? (
+                <div className="mt-3 flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2.5">
+                  <img src={options.imageDataURL} alt="水印预览" className="h-14 max-w-36 rounded border border-slate-200 bg-slate-50 object-contain" />
+                  <button type="button" disabled={disabled}
+                    onClick={() => update({ imageDataURL: '' })}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 text-sm text-slate-600 disabled:opacity-50">
+                    🗑 移除 Logo
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-2 text-[11px] text-slate-500">⚠️ 未上传水印图片，点击「开始处理」会报错。请上传或切换到「文字水印」模式。</div>
+              )}
+            </Field>
+            <Field label={`Logo 宽度占比 ${Math.round((options.imageWidthRatio ?? 0.18) * 100)}%`} hint="居中模式为整图宽度占比；四角模式会自动缩小约 40%">
+              <input type="range" min={0.03} max={0.8} step={0.01}
+                value={options.imageWidthRatio ?? 0.18}
+                disabled={disabled}
+                onChange={(e) => update({ imageWidthRatio: Number(e.target.value) })} />
+            </Field>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Field label="文字内容" colSpan={2} hint="支持换行符（多行水印）；建议控制在 40 字以内">
+              <textarea className="input min-h-[72px] resize-y leading-6" rows={2}
+                value={options.text ?? '© MendFile.com'}
+                disabled={disabled}
+                onChange={(e) => update({ text: e.target.value })} />
+            </Field>
+            <Field label="字号 (px)">
+              <input type="number" className="input" min={8} max={240}
+                value={options.fontSize ?? 32}
+                disabled={disabled}
+                onChange={(e) => update({ fontSize: Number(e.target.value) })} />
+            </Field>
+            <Field label="文字颜色">
+              <div className="flex items-center gap-2 h-10">
+                <input type="color" className="h-10 w-14 rounded-lg border border-slate-200 bg-white cursor-pointer"
+                  value={options.color || '#111827'}
+                  disabled={disabled}
+                  onChange={(e) => update({ color: e.target.value })} />
+                <input type="text" className="input font-mono text-xs flex-1 !py-1 !h-10"
+                  value={options.color || '#111827'}
+                  disabled={disabled}
+                  onChange={(e) => update({ color: e.target.value })} />
+              </div>
+            </Field>
+          </div>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label={`间距 / 边距 ${options.padding ?? 60} px`} hint="平铺模式为水印之间步长；四角模式为距边距离">
+            <input type="range" min={0} max={400} step={2}
+              value={options.padding ?? 60}
+              disabled={disabled}
+              onChange={(e) => update({ padding: Number(e.target.value) })} />
+          </Field>
+          <Field label="输出格式">
+            <select className="input" disabled={disabled} value={options.outputFormat || 'same'}
+              onChange={(e) => update({ outputFormat: e.target.value })}>
+              <option value="same">保持原格式（默认）</option>
+              <option value="jpg">JPG（体积小）</option>
+              <option value="png">PNG（无损透明）</option>
+            </select>
+          </Field>
+          <Field label={`输出质量 ${options.quality ?? 92}%`} hint="仅 JPG/WebP 生效">
+            <input type="range" min={40} max={100} step={1}
+              value={options.quality ?? 92}
+              disabled={disabled}
+              onChange={(e) => update({ quality: Number(e.target.value) })} />
+          </Field>
+        </div>
+      </div>
+    ),
+    'image-stitch': (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="拼接模式">
+            <select className="input" disabled={disabled} value={options.direction || 'vertical'}
+              onChange={(e) => update({ direction: e.target.value })}>
+              <option value="vertical">⬇ 纵向拼接（聊天记录 / 长截图）</option>
+              <option value="horizontal">➡ 横向拼接（对比图 / 全景）</option>
+              <option value="grid2">⊞ 2 列网格拼图（九宫格 · 发圈）</option>
+            </select>
+          </Field>
+          <Field label={`间距 ${options.gap ?? 8} px`} hint="0 为无缝密接；推荐 6~16px 带白边更美观">
+            <input type="range" min={0} max={200} step={1}
+              value={options.gap ?? 8}
+              disabled={disabled}
+              onChange={(e) => update({ gap: Number(e.target.value) })} />
+          </Field>
+          <Field label="背景模式">
+            <div className="flex items-center gap-3 h-10">
+              <label className="inline-flex items-center gap-1.5 text-sm">
+                <input type="radio" name={`stitch-bg-${toolKey}`}
+                  checked={!options.bgTransparent}
+                  disabled={disabled}
+                  onChange={() => update({ bgTransparent: false })} />
+                纯色
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-sm">
+                <input type="radio" name={`stitch-bg-${toolKey}`}
+                  checked={!!options.bgTransparent}
+                  disabled={disabled}
+                  onChange={() => update({ bgTransparent: true })} />
+                透明（仅 PNG）
+              </label>
+            </div>
+          </Field>
+          <Field label="背景颜色" hint="仅「纯色」模式生效">
+            <div className="flex items-center gap-2 h-10">
+              <input type="color" className="h-10 w-14 rounded-lg border border-slate-200 bg-white cursor-pointer"
+                value={options.bgColor || '#ffffff'}
+                disabled={disabled || options.bgTransparent}
+                onChange={(e) => update({ bgColor: e.target.value })} />
+              <input type="text" className="input font-mono text-xs flex-1 !py-1 !h-10"
+                value={options.bgColor || '#ffffff'}
+                disabled={disabled || options.bgTransparent}
+                onChange={(e) => update({ bgColor: e.target.value })} />
+            </div>
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="输出格式">
+            <select className="input" disabled={disabled} value={options.outputFormat || 'jpg'}
+              onChange={(e) => update({ outputFormat: e.target.value })}>
+              <option value="jpg">JPG（体积小，推荐）</option>
+              <option value="png">PNG（无损 / 透明）</option>
+              <option value="webp">WebP（更小更高清）</option>
+            </select>
+          </Field>
+          <Field label={`输出质量 ${options.quality ?? 92}%`} hint="仅 JPG/WebP 生效">
+            <input type="range" min={40} max={100} step={1}
+              value={options.quality ?? 92}
+              disabled={disabled}
+              onChange={(e) => update({ quality: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <div className="text-xs text-slate-500 bg-slate-100/60 rounded-lg p-3 leading-5">
+          💡 <strong>使用提示</strong>：纵向模式自动等宽对齐（取最大宽度），横向模式自动等高对齐；2 列网格按首行宽度统一列宽，建议上传比例相近的图片以获得最佳观感。顺序可在上方文件列表用「↑ / ↓」调整。
+        </div>
+      </div>
+    ),
+    'image-split': (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="分割模式">
+            <select className="input" disabled={disabled} value={options.mode || 'grid'}
+              onChange={(e) => update({ mode: e.target.value })}>
+              <option value="grid">网格等分（例：九宫格 3×3）</option>
+              <option value="rows">仅横向等分（按行切）</option>
+              <option value="cols">仅纵向等分（按列切）</option>
+            </select>
+          </Field>
+          <Field label={`行数 ${options.rows ?? 3}`} hint="2~12，仅 grid / rows 生效">
+            <input type="range" min={1} max={12} step={1}
+              value={options.rows ?? 3}
+              disabled={disabled || options.mode === 'cols'}
+              onChange={(e) => update({ rows: Number(e.target.value) })} />
+            <div className="text-[11px] text-slate-400 mt-0.5 text-right">当前 {options.mode === 'cols' ? 1 : options.rows ?? 3} 行</div>
+          </Field>
+          <Field label={`列数 ${options.cols ?? 3}`} hint="2~12，仅 grid / cols 生效">
+            <input type="range" min={1} max={12} step={1}
+              value={options.cols ?? 3}
+              disabled={disabled || options.mode === 'rows'}
+              onChange={(e) => update({ cols: Number(e.target.value) })} />
+            <div className="text-[11px] text-slate-400 mt-0.5 text-right">当前 {options.mode === 'rows' ? 1 : options.cols ?? 3} 列</div>
+          </Field>
+          <Field label={`重叠像素 ${options.overlap ?? 0} px`} hint="地图 / 全景 / 漫画拼图时可设 10~30px 消除边界缝隙">
+            <input type="range" min={0} max={80} step={1}
+              value={options.overlap ?? 0}
+              disabled={disabled}
+              onChange={(e) => update({ overlap: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="输出格式">
+            <select className="input" disabled={disabled} value={options.outputFormat || 'same'}
+              onChange={(e) => update({ outputFormat: e.target.value })}>
+              <option value="same">保持原格式（默认）</option>
+              <option value="png">PNG（无损）</option>
+              <option value="jpg">JPG（体积小）</option>
+            </select>
+          </Field>
+          <Field label={`输出质量 ${options.quality ?? 92}%`} hint="仅 JPG 生效">
+            <input type="range" min={40} max={100} step={1}
+              value={options.quality ?? 92}
+              disabled={disabled}
+              onChange={(e) => update({ quality: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <div className="text-xs text-slate-500 bg-slate-100/60 rounded-lg p-3 leading-5">
+          🧩 批量多图分割会自动命名为 <code className="font-mono bg-white px-1.5 py-0.5 rounded border">文件名_r1c1.png</code>、<code className="font-mono bg-white px-1.5 py-0.5 rounded border">_r1c2.png</code>…，所有切片打包进一个 ZIP。建议发朋友圈九宫格：模式「网格」，行列 3×3。
+        </div>
+      </div>
+    ),
+    'image-edit': (
+      <div className="space-y-4">
+        <div>
+          <div className="text-xs text-slate-500 mb-2 font-medium">① 旋转角度（常用快捷操作）</div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { v: 0, label: '0° 不旋转' },
+              { v: 90, label: '↻ 90° 顺时针' },
+              { v: 180, label: '⇅ 180° 上下颠倒' },
+              { v: 270, label: '↺ 90° 逆时针' },
+            ].map((r) => (
+              <button type="button" key={r.v}
+                disabled={disabled}
+                onClick={() => update({ rotate: r.v })}
+                className={`px-3 py-1.5 text-sm rounded-lg border transition disabled:opacity-50 ${Number(options.rotate ?? 0) === r.v ? 'bg-brand-50 border-brand-400 text-brand-700 font-medium' : 'bg-white border-slate-200 text-slate-700 hover:border-brand-300'}`}>
+                {r.label}
+              </button>
+            ))}
+            <div className="inline-flex items-center gap-2 px-2 py-1 rounded-lg border border-slate-200 bg-white">
+              <span className="text-xs text-slate-500">自定义°</span>
+              <input type="number" className="w-20 input !py-1 !h-8 text-xs" min={-180} max={180}
+                value={options.rotate ?? 0}
+                disabled={disabled}
+                onChange={(e) => update({ rotate: Number(e.target.value) })} />
+            </div>
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-slate-500 mb-2 font-medium">② 镜像翻转（可组合）</div>
+          <div className="flex flex-wrap gap-3">
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg border border-slate-200 bg-white">
+              <input type="checkbox" className="rounded" disabled={disabled}
+                checked={!!options.flipH}
+                onChange={(e) => update({ flipH: e.target.checked })} />
+              ⇆ 水平镜像（左右翻转）
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg border border-slate-200 bg-white">
+              <input type="checkbox" className="rounded" disabled={disabled}
+                checked={!!options.flipV}
+                onChange={(e) => update({ flipV: e.target.checked })} />
+              ⇅ 垂直镜像（上下翻转）
+            </label>
+            <button type="button" disabled={disabled}
+              onClick={() => update({ flipH: false, flipV: false, rotate: 0, cropTop: 0, cropBottom: 0, cropLeft: 0, cropRight: 0 })}
+              className="px-3 py-2 text-sm rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+              ↺ 重置所有参数
+            </button>
+          </div>
+        </div>
+        <div>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="text-xs text-slate-500 font-medium">③ 四边裁剪</div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-slate-400">单位：</span>
+              <label className="inline-flex items-center gap-1 cursor-pointer">
+                <input type="radio" name={`cropunit-${toolKey}`}
+                  checked={(options.cropUnit || 'pixel') === 'pixel'}
+                  disabled={disabled}
+                  onChange={() => update({ cropUnit: 'pixel' })} />
+                像素 px
+              </label>
+              <label className="inline-flex items-center gap-1 cursor-pointer">
+                <input type="radio" name={`cropunit-${toolKey}`}
+                  checked={(options.cropUnit || 'pixel') === 'percent'}
+                  disabled={disabled}
+                  onChange={() => update({ cropUnit: 'percent' })} />
+                百分比 %
+              </label>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Field label={`上 ${options.cropUnit === 'percent' ? '%' : 'px'}`}>
+              <input type="number" className="input" min={0} max={99999}
+                value={options.cropTop ?? 0}
+                disabled={disabled}
+                onChange={(e) => update({ cropTop: Number(e.target.value) })} />
+            </Field>
+            <Field label={`下 ${options.cropUnit === 'percent' ? '%' : 'px'}`}>
+              <input type="number" className="input" min={0} max={99999}
+                value={options.cropBottom ?? 0}
+                disabled={disabled}
+                onChange={(e) => update({ cropBottom: Number(e.target.value) })} />
+            </Field>
+            <Field label={`左 ${options.cropUnit === 'percent' ? '%' : 'px'}`}>
+              <input type="number" className="input" min={0} max={99999}
+                value={options.cropLeft ?? 0}
+                disabled={disabled}
+                onChange={(e) => update({ cropLeft: Number(e.target.value) })} />
+            </Field>
+            <Field label={`右 ${options.cropUnit === 'percent' ? '%' : 'px'}`}>
+              <input type="number" className="input" min={0} max={99999}
+                value={options.cropRight ?? 0}
+                disabled={disabled}
+                onChange={(e) => update({ cropRight: Number(e.target.value) })} />
+            </Field>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="输出格式">
+            <select className="input" disabled={disabled} value={options.outputFormat || 'same'}
+              onChange={(e) => update({ outputFormat: e.target.value })}>
+              <option value="same">保持原格式（默认）</option>
+              <option value="jpg">JPG（体积小）</option>
+              <option value="png">PNG（无损透明）</option>
+            </select>
+          </Field>
+          <Field label={`输出质量 ${options.quality ?? 92}%`} hint="仅 JPG/WebP 生效">
+            <input type="range" min={40} max={100} step={1}
+              value={options.quality ?? 92}
+              disabled={disabled}
+              onChange={(e) => update({ quality: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <div className="text-xs text-slate-500 bg-slate-100/60 rounded-lg p-3 leading-5">
+          ℹ️ <strong>处理顺序</strong>：先按数值裁剪四边 → 再执行镜像翻转 → 最后旋转角度。自定义非 90° 倍数斜切旋转后四周会自动填充透明或白底，保证画面完整不被裁切。
+        </div>
+      </div>
+    ),
+    'image-removebg': (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label={`容差阈值 ${options.threshold ?? 28} / 255`} hint={'越大越「狠」（抠除越多）可能误扣主体；越小越保守可能残留白边'}>
+            <input type="range" min={0} max={200} step={1}
+              value={options.threshold ?? 28}
+              disabled={disabled}
+              onChange={(e) => update({ threshold: Number(e.target.value) })} />
+          </Field>
+          <Field label={`边缘羽化 ${options.feather ?? 2} px`} hint="羽化越大边缘越柔和但可能略模糊；建议 1~4px">
+            <input type="range" min={0} max={10} step={1}
+              value={options.feather ?? 2}
+              disabled={disabled}
+              onChange={(e) => update({ feather: Number(e.target.value) })} />
+          </Field>
+          <Field label="输出背景">
+            <select className="input" disabled={disabled} value={options.outputMode || 'transparent'}
+              onChange={(e) => update({ outputMode: e.target.value })}>
+              <option value="transparent">透明背景 PNG（推荐）</option>
+              <option value="custom-color">自定义纯色背景</option>
+            </select>
+          </Field>
+          {options.outputMode === 'custom-color' && (
+            <Field label="自定义背景色">
+              <div className="flex items-center gap-2 h-10">
+                <input type="color" className="h-10 w-14 rounded-lg border border-slate-200 bg-white cursor-pointer"
+                  value={options.customBgColor || '#ffffff'}
+                  disabled={disabled}
+                  onChange={(e) => update({ customBgColor: e.target.value })} />
+                <input type="text" className="input font-mono text-xs flex-1 !py-1 !h-10"
+                  value={options.customBgColor || '#ffffff'}
+                  disabled={disabled}
+                  onChange={(e) => update({ customBgColor: e.target.value })} />
+              </div>
+            </Field>
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="输出格式">
+            <select className="input" disabled={disabled} value={options.outputFormat || 'png'}
+              onChange={(e) => update({ outputFormat: e.target.value })}>
+              <option value="png">PNG（必须，支持透明）</option>
+              <option value="jpg">JPG（强制白底或自定义色底）</option>
+            </select>
+          </Field>
+          <Field label={`输出质量 ${options.quality ?? 92}%`} hint="仅 JPG 生效">
+            <input type="range" min={40} max={100} step={1}
+              value={options.quality ?? 92}
+              disabled={disabled}
+              onChange={(e) => update({ quality: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 leading-5">
+          <p className="font-semibold mb-1">⚠️ 【合规提示 · 必看】本工具不是神经网络 AI 抠图</p>
+          <p>仅基于纯 Canvas Flood Fill 颜色容差法 + 边缘羽化，效果远不如专业商用云端抠图服务。</p>
+          <ul className="mt-1.5 space-y-0.5 list-disc list-inside text-red-700/90">
+            <li>✅ 仅适合：<strong>纯色墙面背景人像 / 白底产品图 / 轻度渐变色背景</strong></li>
+            <li>❌ 不适合：发丝、婚纱、半透明玻璃、高反光、复杂图案背景、前景与背景颜色相近</li>
+            <li>❌ 身份证、护照、签证、考试报名、正式证件照等用途请务必使用专业照相馆服务</li>
+          </ul>
+          <p className="mt-1.5 text-red-700/80">建议先上传单张预览调整阈值，满意后再批量处理。全部计算均在浏览器本地完成，不传输任何图像数据。</p>
+        </div>
+      </div>
+    ),
   };
 
   if (!panels[toolKey]) return null;

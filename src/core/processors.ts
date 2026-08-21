@@ -1948,3 +1948,672 @@ export const qrParse: ProcessFn = async ({ files, options }, onProgress): Promis
     },
   };
 };
+
+/* =======================================================
+ *  批次 3 · 图片剩余功能补齐
+ * ======================================================= */
+
+/** 把十六进制颜色 + 不透明度组合成 rgba 字符串 */
+function rgba(hex: string, a: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+/** 在画布上执行单边裁剪（按像素），返回新画布 */
+function cropCanvasPx(src: HTMLCanvasElement, top: number, bottom: number, left: number, right: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  const w = Math.max(1, src.width - left - right);
+  const h = Math.max(1, src.height - top - bottom);
+  c.width = w; c.height = h;
+  c.getContext('2d')!.drawImage(src, left, top, w, h, 0, 0, w, h);
+  return c;
+}
+
+/** 对 canvas 做 box blur 式的 alpha 羽化（只影响 alpha 通道），用于 removeBg */
+function featherAlpha(imageData: ImageData, radiusPx: number): ImageData {
+  if (radiusPx <= 0) return imageData;
+  const { width: w, height: h, data: d } = imageData;
+  const alpha = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) alpha[i] = d[i * 4 + 3] / 255;
+  const tmp = new Float32Array(w * h);
+  const r = Math.max(1, Math.round(radiusPx));
+  // 简单的两次水平+垂直盒式滤波近似高斯
+  for (let pass = 0; pass < 2; pass++) {
+    // 水平
+    for (let y = 0; y < h; y++) {
+      let sum = 0;
+      for (let x = -r; x < r + 1; x++) sum += alpha[y * w + Math.max(0, Math.min(w - 1, x))];
+      for (let x = 0; x < w; x++) {
+        tmp[y * w + x] = sum / (2 * r + 1);
+        const x1 = Math.max(0, x - r);
+        const x2 = Math.min(w - 1, x + r + 1);
+        sum += alpha[y * w + x2] - alpha[y * w + x1];
+      }
+    }
+    // 垂直
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      for (let y = -r; y < r + 1; y++) sum += tmp[Math.max(0, Math.min(h - 1, y)) * w + x];
+      for (let y = 0; y < h; y++) {
+        alpha[y * w + x] = sum / (2 * r + 1);
+        const y1 = Math.max(0, y - r);
+        const y2 = Math.min(h - 1, y + r + 1);
+        sum += tmp[y2 * w + x] - tmp[y1 * w + x];
+      }
+    }
+  }
+  for (let i = 0; i < w * h; i++) d[i * 4 + 3] = Math.round(alpha[i] * 255);
+  return imageData;
+}
+
+/* ============ 3.1 图片批量加水印 ============ */
+export const imageWatermark: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  const mode: string = options.mode || 'text'; // text | image
+  const layout: string = options.layout || 'tile'; // tile | center | corners
+  const opacity = Math.max(0, Math.min(1, Number(options.opacity ?? 0.28)));
+  const rotation = Number(options.rotation ?? -30);
+  const padding = Math.max(0, Number(options.padding ?? 60));
+  const outFmtMode: string = options.outputFormat || 'same';
+  const quality = Math.max(0.1, Math.min(1, Number(options.quality ?? 0.92)));
+
+  // 文字水印参数
+  const text: string = options.text || '© MendFile';
+  const fontSize = Math.max(8, Number(options.fontSize ?? 32));
+  const color: string = options.color || '#111827';
+  const fontFamily: string = options.fontFamily || 'system-ui, sans-serif';
+
+  // 图片水印参数
+  const logoDataURL: string = options.imageDataURL || '';
+  const widthRatio = Math.max(0.02, Math.min(1, Number(options.imageWidthRatio ?? 0.18)));
+  let logoImg: HTMLImageElement | null = null;
+  if (mode === 'image') {
+    if (!logoDataURL) throw new Error('请先上传水印图片（Logo），或将水印模式切回「文字」');
+    onProgress(0.05, '加载水印图标');
+    logoImg = await loadImage(logoDataURL);
+  }
+
+  const results: { name: string; blob: Blob }[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.08 + (fi / files.length) * 0.8, `正在加水印 ${fi + 1}/${files.length}：${f.name}`);
+    const dataUrl = await readAsDataURL(f);
+    const img = await loadImage(dataUrl);
+    const baseCanvas = drawScaled(img); // 原始尺寸
+    const W = baseCanvas.width;
+    const H = baseCanvas.height;
+    const ctx = baseCanvas.getContext('2d')!;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+
+    if (layout === 'tile') {
+      // 平铺密集水印：以对角线的 1/6 为步长估计
+      const diag = Math.sqrt(W * W + H * H);
+      const step = Math.max(60, padding + fontSize * 2 + 40);
+      // 先按步长生成一个比画布更大的网格坐标，然后旋转绘制
+      const rad = (rotation * Math.PI) / 180;
+      ctx.translate(W / 2, H / 2);
+      ctx.rotate(rad);
+      // 估计覆盖范围
+      const spanX = Math.ceil(diag / step) + 2;
+      const spanY = Math.ceil(diag / step) + 2;
+      ctx.globalAlpha = opacity;
+      ctx.fillStyle = color;
+      if (mode === 'text') {
+        ctx.font = `${fontSize}px ${fontFamily}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+      }
+      for (let gy = -spanY; gy <= spanY; gy++) {
+        for (let gx = -spanX; gx <= spanX; gx++) {
+          const dx = gx * step + ((gy % 2) * step) / 2; // 交错更密集
+          const dy = gy * step;
+          if (mode === 'text') {
+            // 支持按 \n 多行
+            const lines = String(text).split(/\r?\n/);
+            const lh = fontSize * 1.35;
+            const totalH = lh * lines.length;
+            lines.forEach((ln, idx) => {
+              ctx.fillText(ln, dx, dy - totalH / 2 + lh * (idx + 0.5));
+            });
+          } else if (logoImg) {
+            const lw = Math.max(20, W * widthRatio);
+            const lh = Math.round(lw * (logoImg.height / logoImg.width));
+            ctx.drawImage(logoImg, dx - lw / 2, dy - lh / 2, lw, lh);
+          }
+        }
+      }
+    } else {
+      // center / corners：非旋转布局（位置固定，水印本身可旋转）
+      const positions: Array<{ px: number; py: number }> = [];
+      const pad = padding;
+      if (layout === 'center') positions.push({ px: 0.5, py: 0.5 });
+      else if (layout === 'corners') {
+        positions.push({ px: 0.5, py: 0.5 }); // 中
+        positions.push({ px: 0, py: 0 }); // 左上
+        positions.push({ px: 1, py: 0 }); // 右上
+        positions.push({ px: 0, py: 1 }); // 左下
+        positions.push({ px: 1, py: 1 }); // 右下
+      }
+      positions.forEach((pos, i) => {
+        ctx.save();
+        let x0: number, y0: number;
+        // corners 的四个角留 padding
+        if (layout === 'corners' && i > 0) {
+          x0 = pos.px === 0 ? pad : pos.px === 1 ? W - pad : W / 2;
+          y0 = pos.py === 0 ? pad : pos.py === 1 ? H - pad : H / 2;
+        } else {
+          x0 = W * pos.px;
+          y0 = H * pos.py;
+        }
+        ctx.translate(x0, y0);
+        ctx.rotate((rotation * Math.PI) / 180);
+        ctx.fillStyle = color;
+        if (mode === 'text') {
+          ctx.font = `${fontSize}px ${fontFamily}`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const lines = String(text).split(/\r?\n/);
+          const lh = fontSize * 1.35;
+          const totalH = lh * lines.length;
+          lines.forEach((ln, idx) => {
+            ctx.fillText(ln, 0, -totalH / 2 + lh * (idx + 0.5));
+          });
+        } else if (logoImg) {
+          // 中心位置水印按 widthRatio；四角位置按比例缩小一半
+          const baseRatio = i === 0 ? widthRatio : widthRatio * 0.6;
+          const lw = Math.max(20, W * baseRatio);
+          const lh = Math.round(lw * (logoImg.height / Math.max(1, logoImg.width)));
+          ctx.drawImage(logoImg, -lw / 2, -lh / 2, lw, lh);
+        }
+        ctx.restore();
+      });
+    }
+    ctx.restore();
+
+    const inFmt = inferFormat(f, 'png');
+    const outFmt = outFmtMode === 'same' ? inFmt : outFmtMode;
+    const mime = fmtToMime(outFmt);
+    // 无透明 → JPG：默认白底
+    let outCanvas = baseCanvas;
+    if ((outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'bmp') && inFmt === 'png') {
+      outCanvas = document.createElement('canvas');
+      outCanvas.width = W; outCanvas.height = H;
+      const octx = outCanvas.getContext('2d')!;
+      octx.fillStyle = '#ffffff';
+      octx.fillRect(0, 0, W, H);
+      octx.drawImage(baseCanvas, 0, 0);
+    }
+    const q = (outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'webp') ? quality : undefined;
+    const blob = await canvasToBlob(outCanvas, mime, q ?? 0.92);
+    results.push({ name: `${stripExt(safeName(f.name))}_wmark.${fmtToExt(outFmt)}`, blob });
+  }
+
+  const stats: Record<string, any> = {
+    水印模式: mode === 'text' ? '文字水印' : '图片水印',
+    布局方式: layout === 'tile' ? '平铺密集（防盗）' : layout === 'center' ? '居中单张' : '四角 + 居中 5 处',
+    透明度: `${Math.round(opacity * 100)}%`,
+    旋转角度: `${rotation}°`,
+    输出格式: outFmtMode === 'same' ? '保持原格式' : outFmtMode.toUpperCase(),
+  };
+  return packImages(results, 'zip', 'MendFile_批量加水印结果', (r, m) => onProgress(0.85 + r * 0.12, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 3.2 长图拼接 ============ */
+export const imageStitch: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  if (files.length < 2) throw new Error('请至少上传 2 张图片用于拼接');
+  const direction: string = options.direction || 'vertical'; // vertical | horizontal | grid2
+  const gap = Math.max(0, Math.min(200, Number(options.gap ?? 8)));
+  const bgTransparent = !!options.bgTransparent;
+  const bgColor: string = options.bgColor || '#ffffff';
+  const outFmt: string = options.outputFormat || 'jpg';
+  const quality = Math.max(0.1, Math.min(1, Number(options.quality ?? 0.92)));
+
+  // 加载全部图片
+  onProgress(0.08, `读取图片（共 ${files.length} 张）`);
+  const imgs: HTMLImageElement[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const dataUrl = await readAsDataURL(files[fi]);
+    imgs.push(await loadImage(dataUrl));
+    onProgress(0.08 + (fi / files.length) * 0.35, `读取图片 ${fi + 1}/${files.length}`);
+  }
+
+  onProgress(0.5, '计算画布并拼接');
+  let canvasW = 0, canvasH = 0;
+  const drawList: Array<{ img: HTMLImageElement; dx: number; dy: number; dw: number; dh: number }> = [];
+
+  if (direction === 'vertical') {
+    // 等宽：取最大宽度，其他按比例缩放到同宽
+    canvasW = Math.max(...imgs.map((i) => i.naturalWidth));
+    const sizes = imgs.map((img) => {
+      const scale = canvasW / img.naturalWidth;
+      return { w: canvasW, h: Math.round(img.naturalHeight * scale) };
+    });
+    canvasH = sizes.reduce((s, z) => s + z.h, 0) + gap * (imgs.length + 1);
+    let y = gap;
+    for (let i = 0; i < imgs.length; i++) {
+      drawList.push({ img: imgs[i], dx: 0, dy: y, dw: sizes[i].w, dh: sizes[i].h });
+      y += sizes[i].h + gap;
+    }
+  } else if (direction === 'horizontal') {
+    // 等高：取最大高度
+    canvasH = Math.max(...imgs.map((i) => i.naturalHeight));
+    const sizes = imgs.map((img) => {
+      const scale = canvasH / img.naturalHeight;
+      return { w: Math.round(img.naturalWidth * scale), h: canvasH };
+    });
+    canvasW = sizes.reduce((s, z) => s + z.w, 0) + gap * (imgs.length + 1);
+    let x = gap;
+    for (let i = 0; i < imgs.length; i++) {
+      drawList.push({ img: imgs[i], dx: x, dy: 0, dw: sizes[i].w, dh: sizes[i].h });
+      x += sizes[i].w + gap;
+    }
+  } else {
+    // grid2：2 列网格（1 列也可），每行两张，所有图片按第 1 行最大宽度统一列宽
+    const cols = 2;
+    const rows = Math.ceil(imgs.length / cols);
+    // 先按统一列宽：取图片最大宽度 × 1 列，2 列则按比例
+    const firstRowMax = Math.max(...imgs.slice(0, cols).map((i) => i.naturalWidth));
+    const cellW = firstRowMax;
+    // 计算每张图缩放到 cellW 后的高度
+    const sizes = imgs.map((img) => {
+      const scale = cellW / img.naturalWidth;
+      return { w: cellW, h: Math.round(img.naturalHeight * scale) };
+    });
+    const rowHeights: number[] = [];
+    for (let r = 0; r < rows; r++) {
+      let rh = 0;
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        if (idx < sizes.length) rh = Math.max(rh, sizes[idx].h);
+      }
+      rowHeights.push(rh);
+    }
+    canvasW = cellW * cols + gap * (cols + 1);
+    canvasH = rowHeights.reduce((s, h) => s + h, 0) + gap * (rows + 1);
+    let y = gap;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        if (idx >= imgs.length) continue;
+        const x = gap + c * (cellW + gap);
+        // 垂直居中
+        const extra = (rowHeights[r] - sizes[idx].h) / 2;
+        drawList.push({ img: imgs[idx], dx: x, dy: y + extra, dw: sizes[idx].w, dh: sizes[idx].h });
+      }
+      y += rowHeights[r] + gap;
+    }
+  }
+
+  // 安全限制：避免过大画布（超过 4096MB 像素会炸）
+  if (canvasW * canvasH > 180_000_000) {
+    throw new Error(`拼接后的画布过大（约 ${(canvasW * canvasH / 1_000_000).toFixed(0)} 百万像素），请减少图片数量或先压缩再拼接`);
+  }
+
+  const out = document.createElement('canvas');
+  out.width = canvasW; out.height = canvasH;
+  const octx = out.getContext('2d')!;
+  if (!bgTransparent) {
+    octx.fillStyle = bgColor;
+    octx.fillRect(0, 0, canvasW, canvasH);
+  }
+  for (const d of drawList) {
+    octx.drawImage(d.img, d.dx, d.dy, d.dw, d.dh);
+  }
+
+  onProgress(0.82, '编码输出');
+  const mime = fmtToMime(outFmt);
+  // JPG/BMP 默认不透明：若用户选了透明但格式不支持，强制白底
+  if ((outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'bmp') && bgTransparent) {
+    const flat = document.createElement('canvas');
+    flat.width = canvasW; flat.height = canvasH;
+    const fctx = flat.getContext('2d')!;
+    fctx.fillStyle = '#ffffff';
+    fctx.fillRect(0, 0, canvasW, canvasH);
+    fctx.drawImage(out, 0, 0);
+    const blob = await canvasToBlob(flat, mime, quality);
+    const ext = fmtToExt(outFmt);
+    return {
+      blob, ext, fileName: 'MendFile_长图拼接结果',
+      preview: {
+        stats: {
+          拼接模式: direction === 'vertical' ? '纵向' : direction === 'horizontal' ? '横向' : '2 列网格拼图',
+          输入图片: `${files.length} 张`,
+          输出尺寸: `${canvasW} × ${canvasH} px`,
+          间距: `${gap} px`,
+          背景: bgTransparent ? '透明' : bgColor,
+          输出格式: outFmt.toUpperCase(),
+        },
+        thumbnails: [flat.toDataURL('image/jpeg', 0.45)],
+      },
+    };
+  }
+  const q = (outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'webp') ? quality : undefined;
+  const blob = await canvasToBlob(out, mime, q ?? 0.92);
+  onProgress(1);
+  return {
+    blob, ext: fmtToExt(outFmt), fileName: 'MendFile_长图拼接结果',
+    preview: {
+      stats: {
+        拼接模式: direction === 'vertical' ? '纵向' : direction === 'horizontal' ? '横向' : '2 列网格拼图',
+        输入图片: `${files.length} 张`,
+        输出尺寸: `${canvasW} × ${canvasH} px`,
+        间距: `${gap} px`,
+        背景: bgTransparent ? '透明' : bgColor,
+        输出格式: outFmt.toUpperCase(),
+      },
+      thumbnails: [out.toDataURL('image/jpeg', 0.45)],
+    },
+  };
+};
+
+/* ============ 3.3 图片分割工具 ============ */
+export const imageSplit: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  const mode: string = options.mode || 'grid'; // grid | rows | cols
+  let rows = Math.max(1, Math.min(12, Number(options.rows ?? 3)));
+  let cols = Math.max(1, Math.min(12, Number(options.cols ?? 3)));
+  if (mode === 'rows') cols = 1;
+  if (mode === 'cols') rows = 1;
+  const overlap = Math.max(0, Math.min(80, Number(options.overlap ?? 0)));
+  const outFmtMode: string = options.outputFormat || 'same';
+  const quality = Math.max(0.1, Math.min(1, Number(options.quality ?? 0.92)));
+
+  const results: { name: string; blob: Blob }[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.8, `正在分割 ${fi + 1}/${files.length}：${f.name}`);
+    const dataUrl = await readAsDataURL(f);
+    const img = await loadImage(dataUrl);
+    const base = drawScaled(img);
+    const W = base.width, H = base.height;
+
+    const inFmt = inferFormat(f, 'png');
+    const outFmt = outFmtMode === 'same' ? inFmt : outFmtMode;
+    const mime = fmtToMime(outFmt);
+    const q = (outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'webp') ? quality : undefined;
+
+    const prefix = stripExt(safeName(f.name)) || 'image';
+
+    // 切片宽高：考虑 overlap
+    // 列宽 = (W + overlap*(cols-1)) / cols 的近似：让首尾不留白
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        // 计算每片区域：均分 + 向后重叠 overlap 像素（最后一片除外）
+        const pieceW = Math.round((W + overlap * (cols - 1)) / cols);
+        const pieceH = Math.round((H + overlap * (rows - 1)) / rows);
+        const sx = Math.min(W - 1, c * (pieceW - overlap));
+        const sy = Math.min(H - 1, r * (pieceH - overlap));
+        const sw = Math.min(W - sx, pieceW);
+        const sh = Math.min(H - sy, pieceH);
+        const slice = document.createElement('canvas');
+        slice.width = sw; slice.height = sh;
+        slice.getContext('2d')!.drawImage(base, sx, sy, sw, sh, 0, 0, sw, sh);
+        // JPG/BMP：PNG 原图需铺白底
+        let outSlice: HTMLCanvasElement = slice;
+        if ((outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'bmp') && inFmt === 'png') {
+          outSlice = document.createElement('canvas');
+          outSlice.width = sw; outSlice.height = sh;
+          const fx = outSlice.getContext('2d')!;
+          fx.fillStyle = '#ffffff';
+          fx.fillRect(0, 0, sw, sh);
+          fx.drawImage(slice, 0, 0);
+        }
+        const blob = await canvasToBlob(outSlice, mime, q ?? 0.92);
+        results.push({ name: `${prefix}_r${r + 1}c${c + 1}.${fmtToExt(outFmt)}`, blob });
+      }
+    }
+  }
+
+  const stats: Record<string, any> = {
+    分割模式: mode === 'grid' ? `网格（${rows} 行 × ${cols} 列）` : mode === 'rows' ? `仅横向等分（${rows} 行）` : `仅纵向等分（${cols} 列）`,
+    单图切片数: `${rows * cols} 片`,
+    重叠像素: `${overlap} px`,
+    输出总切片: `${results.length} 张`,
+    输出格式: outFmtMode === 'same' ? '保持原格式' : outFmtMode.toUpperCase(),
+  };
+  return packImages(results, 'zip', 'MendFile_图片分割结果', (r, m) => onProgress(0.85 + r * 0.12, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 3.4 图片旋转裁剪 ============ */
+export const imageEdit: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  const rotate = Number(options.rotate ?? 0);
+  const flipH = !!options.flipH;
+  const flipV = !!options.flipV;
+  const cropUnit: string = options.cropUnit || 'pixel';
+  let cropTop = Math.max(0, Number(options.cropTop ?? 0));
+  let cropBottom = Math.max(0, Number(options.cropBottom ?? 0));
+  let cropLeft = Math.max(0, Number(options.cropLeft ?? 0));
+  let cropRight = Math.max(0, Number(options.cropRight ?? 0));
+  const outFmtMode: string = options.outputFormat || 'same';
+  const quality = Math.max(0.1, Math.min(1, Number(options.quality ?? 0.92)));
+
+  const results: { name: string; blob: Blob }[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.8, `正在编辑 ${fi + 1}/${files.length}：${f.name}`);
+    const dataUrl = await readAsDataURL(f);
+    const img = await loadImage(dataUrl);
+    let canvas = drawScaled(img);
+    let W = canvas.width;
+    let H = canvas.height;
+
+    // 1) 裁剪：百分比 → 像素
+    let t = cropTop, b = cropBottom, l = cropLeft, r = cropRight;
+    if (cropUnit === 'percent') {
+      t = Math.round((cropTop / 100) * H);
+      b = Math.round((cropBottom / 100) * H);
+      l = Math.round((cropLeft / 100) * W);
+      r = Math.round((cropRight / 100) * W);
+    }
+    t = Math.min(H - 1, t); b = Math.min(H - 1 - t, b);
+    l = Math.min(W - 1, l); r = Math.min(W - 1 - l, r);
+    if (t > 0 || b > 0 || l > 0 || r > 0) {
+      canvas = cropCanvasPx(canvas, t, b, l, r);
+      W = canvas.width; H = canvas.height;
+    }
+
+    // 2) 翻转（在原图坐标系）
+    if (flipH || flipV) {
+      const flipped = document.createElement('canvas');
+      flipped.width = W; flipped.height = H;
+      const fctx = flipped.getContext('2d')!;
+      fctx.save();
+      fctx.translate(flipH ? W : 0, flipV ? H : 0);
+      fctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+      fctx.drawImage(canvas, 0, 0);
+      fctx.restore();
+      canvas = flipped;
+    }
+
+    // 3) 旋转：90/180/270 特殊处理更快；其他角度扩充画布
+    let rot = ((rotate % 360) + 360) % 360;
+    if (rot !== 0) {
+      if (rot === 90 || rot === 270) {
+        const out = document.createElement('canvas');
+        out.width = H; out.height = W;
+        const octx = out.getContext('2d')!;
+        octx.save();
+        if (rot === 90) { octx.translate(H, 0); octx.rotate(Math.PI / 2); }
+        else { octx.translate(0, W); octx.rotate(-Math.PI / 2); }
+        octx.drawImage(canvas, 0, 0);
+        octx.restore();
+        canvas = out; W = canvas.width; H = canvas.height;
+      } else if (rot === 180) {
+        const out = document.createElement('canvas');
+        out.width = W; out.height = H;
+        const octx = out.getContext('2d')!;
+        octx.save(); octx.translate(W, H); octx.rotate(Math.PI);
+        octx.drawImage(canvas, 0, 0); octx.restore();
+        canvas = out;
+      } else {
+        // 任意角度：扩充 bounding box
+        const rad = (rot * Math.PI) / 180;
+        const cos = Math.abs(Math.cos(rad));
+        const sin = Math.abs(Math.sin(rad));
+        const nW = Math.round(W * cos + H * sin);
+        const nH = Math.round(W * sin + H * cos);
+        const out = document.createElement('canvas');
+        out.width = nW; out.height = nH;
+        const octx = out.getContext('2d')!;
+        // 默认透明（保留格式支持）；JPG 后续转白底
+        octx.save();
+        octx.translate(nW / 2, nH / 2);
+        octx.rotate(rad);
+        octx.drawImage(canvas, -W / 2, -H / 2);
+        octx.restore();
+        canvas = out; W = nW; H = nH;
+      }
+    }
+
+    // 4) 格式转换
+    const inFmt = inferFormat(f, 'png');
+    const outFmt = outFmtMode === 'same' ? inFmt : outFmtMode;
+    const mime = fmtToMime(outFmt);
+    const q = (outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'webp') ? quality : undefined;
+    // 透明 → 无透明：白底
+    if ((outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'bmp') && (inFmt === 'png' || rot !== 0)) {
+      const flat = document.createElement('canvas');
+      flat.width = W; flat.height = H;
+      const fx = flat.getContext('2d')!;
+      fx.fillStyle = '#ffffff';
+      fx.fillRect(0, 0, W, H);
+      fx.drawImage(canvas, 0, 0);
+      canvas = flat;
+    }
+    const blob = await canvasToBlob(canvas, mime, q ?? 0.92);
+    results.push({ name: `${stripExt(safeName(f.name))}_edited.${fmtToExt(outFmt)}`, blob });
+  }
+
+  const stats: Record<string, any> = {
+    旋转角度: `${rotate}°`,
+    翻转: (flipH ? '水平 ' : '') + (flipV ? '垂直' : '') || '无',
+    裁剪: cropUnit === 'percent'
+      ? `上 ${cropTop}% / 下 ${cropBottom}% / 左 ${cropLeft}% / 右 ${cropRight}%`
+      : `上 ${cropTop} / 下 ${cropBottom} / 左 ${cropLeft} / 右 ${cropRight} px`,
+    输出格式: outFmtMode === 'same' ? '保持原格式' : outFmtMode.toUpperCase(),
+  };
+  return packImages(results, 'zip', 'MendFile_图片旋转裁剪结果', (r, m) => onProgress(0.85 + r * 0.12, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 3.5 前端轻量 AI 抠图（Flood Fill 容差法 + 羽化）============ */
+export const imageRemoveBg: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  const threshold = Math.max(0, Math.min(255, Number(options.threshold ?? 28)));
+  const feather = Math.max(0, Math.min(10, Number(options.feather ?? 2)));
+  const outputMode: string = options.outputMode || 'transparent'; // transparent | custom-color
+  const customBgColor: string = options.customBgColor || '#ffffff';
+  const outFmt: string = options.outputFormat || 'png';
+  const quality = Math.max(0.1, Math.min(1, Number(options.quality ?? 0.92)));
+
+  const results: { name: string; blob: Blob }[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.8, `正在抠图 ${fi + 1}/${files.length}：${f.name}`);
+    const dataUrl = await readAsDataURL(f);
+    const img = await loadImage(dataUrl);
+    const base = drawScaled(img);
+    const W = base.width, H = base.height;
+    const ctx = base.getContext('2d')!;
+    const imgData = ctx.getImageData(0, 0, W, H);
+    const d = imgData.data;
+
+    // 取 4 角 + 4 边中点共 8 个采样点的平均颜色为背景色
+    const samples = [
+      [0, 0], [W - 1, 0], [0, H - 1], [W - 1, H - 1],
+      [Math.floor(W / 2), 0], [Math.floor(W / 2), H - 1],
+      [0, Math.floor(H / 2)], [W - 1, Math.floor(H / 2)],
+    ];
+    let br = 0, bg = 0, bb = 0;
+    samples.forEach(([x, y]) => {
+      const i = (y * W + x) * 4;
+      br += d[i]; bg += d[i + 1]; bb += d[i + 2];
+    });
+    br = Math.round(br / samples.length);
+    bg = Math.round(bg / samples.length);
+    bb = Math.round(bb / samples.length);
+
+    // Flood Fill 从 8 个种子点开始，所有与背景色相近的像素 alpha 置 0
+    // 为了兼顾性能和覆盖，先用「逐像素扫描 + 4 邻域扩散 BFS」近似（通过双 pass）
+    const visited = new Uint8Array(W * H);
+    const queue: number[] = [];
+    const pushPixel = (idx: number) => {
+      if (visited[idx]) return;
+      const i = idx * 4;
+      const dr = d[i] - br, dg = d[i + 1] - bg, db = d[i + 2] - bb;
+      if (Math.sqrt(dr * dr + dg * dg + db * db) <= threshold) {
+        visited[idx] = 1;
+        queue.push(idx);
+      }
+    };
+    samples.forEach(([x, y]) => pushPixel(y * W + x));
+    while (queue.length) {
+      const idx = queue.pop()!;
+      const x = idx % W;
+      const y = Math.floor(idx / W);
+      if (x > 0) pushPixel(idx - 1);
+      if (x < W - 1) pushPixel(idx + 1);
+      if (y > 0) pushPixel(idx - W);
+      if (y < H - 1) pushPixel(idx + W);
+    }
+
+    // 第一次 pass：visited 为 1 的像素背景候选 → 再做一次宽松的边缘判定
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const idx = y * W + x;
+        const i = idx * 4;
+        if (visited[idx]) {
+          d[i + 3] = 0;
+        } else {
+          // 二次判定：如果未 visited，但与背景色差在 threshold*1.1 内且相邻 visited，则也作为半透明边缘
+          const dr = d[i] - br, dg = d[i + 1] - bg, db = d[i + 2] - bb;
+          const diff = Math.sqrt(dr * dr + dg * dg + db * db);
+          const nearBg = (x > 0 && visited[idx - 1]) || (x < W - 1 && visited[idx + 1])
+            || (y > 0 && visited[idx - W]) || (y < H - 1 && visited[idx + W]);
+          if (nearBg && diff <= threshold + 30) {
+            const k = Math.max(0, (diff - threshold) / 30);
+            d[i + 3] = Math.round(d[i + 3] * k);
+          }
+        }
+      }
+    }
+
+    // 羽化（alpha 平滑）
+    if (feather > 0) {
+      featherAlpha(imgData, feather);
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+
+    // 叠加自定义背景色（若输出模式为 custom-color 或输出为 JPG）
+    const needFlat = outputMode === 'custom-color' || outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'bmp';
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = W; finalCanvas.height = H;
+    const fctx = finalCanvas.getContext('2d')!;
+    if (needFlat) {
+      fctx.fillStyle = outputMode === 'custom-color' ? customBgColor : '#ffffff';
+      fctx.fillRect(0, 0, W, H);
+    }
+    fctx.drawImage(base, 0, 0);
+
+    const mime = fmtToMime(outFmt);
+    const q = (outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'webp') ? quality : undefined;
+    const blob = await canvasToBlob(finalCanvas, mime, q ?? 0.92);
+    results.push({ name: `${stripExt(safeName(f.name))}_removebg.${fmtToExt(outFmt)}`, blob });
+  }
+
+  const stats: Record<string, any> = {
+    算法: '纯 Canvas Flood Fill 颜色容差法（非神经网络）',
+    容差阈值: `${threshold} / 255`,
+    边缘羽化: `${feather} px`,
+    输出背景: outputMode === 'transparent' ? '透明 PNG' : `自定义纯色 ${customBgColor}`,
+    输出格式: outFmt.toUpperCase(),
+  };
+  return packImages(results, 'zip', 'MendFile_抠图结果', (r, m) => onProgress(0.85 + r * 0.12, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};

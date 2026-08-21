@@ -830,6 +830,232 @@ export const TOOLS_CONFIG: Record<string, ToolConfig> = {
     processor: P.imageRemoveBg,
     showPreview: true,
   },
+
+  // =======================================================
+  // 批次 4 · 多媒体轻量工具（media 分类 · 6 工具）
+  // 纯前端本地：音视频全部走 MediaRecorder / WebAudio / Canvas
+  // 不引入 ffmpeg.wasm（避免 ~30MB 依赖）；边界提示明确浏览器 codec 支持范围
+  // =======================================================
+  'video-compress': {
+    key: 'video-compress',
+    path: '/tools/video-compress',
+    name: '视频压缩工具',
+    shortDesc: '纯浏览器本地批量压缩 MP4/WebM，可调质量、分辨率缩放、音视频同步输出',
+    category: 'media',
+    icon: '🎬',
+    title: '视频压缩 在线批量减小视频体积 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线视频压缩工具，100% 纯前端本地处理，调用浏览器原生 MediaRecorder + Canvas 实时重编码。支持 MP4/WebM 批量压缩，三档质量 + 可选 50%/75%/100% 分辨率缩放，音频自动压缩同步输出。无需安装任何软件、无视频上传服务器。',
+    keywords: ['在线视频压缩', 'MP4压缩免费', '视频变小不发糊', '批量压缩视频', '网页视频压缩工具', '压缩视频发邮件'],
+    features: [
+      '三档压缩质量：清晰（≈10Mbps）/ 均衡（≈5Mbps）/ 极致（≈2.5Mbps），按场景任选',
+      '可选分辨率缩放：原始 / 75% / 50%，大幅减小体积适合微信/邮件发送',
+      '多文件批量处理，自动 ZIP 打包，单文件直接输出，文件名带 _compressed 后缀',
+      '音视频同步输出，AAC 或 Opus 自动匹配浏览器支持最佳格式',
+    ],
+    boundaries: [
+      '⚠️ 纯浏览器本地处理，视频不会上传任何服务器；但处理过程中会占用较高 CPU/GPU',
+      '⚠️ 采用「原生 MediaRecorder 实时重编码」技术，输出时长 ≈ 视频时长（10 分钟视频需约 10 分钟处理），不支持 GPU 硬件加速',
+      '⚠️ 不同浏览器编码格式不同：Chrome/Edge 输出 MP4(H.264) 或 WebM(VP9)；Safari 仅支持 MP4(H.264)；Firefox 优先 WebM(VP8)',
+      '⚠️ 大于 2GB 的视频文件建议在桌面端使用 HandBrake 等专业软件，浏览器内存处理能力有限',
+      '⚠️ 版权提示：请确保您拥有被处理视频的合法权利，禁止对他人版权视频二次传播',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'video/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_视频压缩结果',
+    defaultOptions: {
+      level: 'balanced', // crisp | balanced | extreme
+      scale: '100', // '100' | '75' | '50'  (string for radios)
+      audioBitrate: '128', // '256' | '128' | '96' | '64'  kbps
+      outputFormat: 'auto', // 'auto' | 'mp4' | 'webm'
+    },
+    processor: P.videoCompress,
+    showPreview: true,
+  },
+  'video-crop': {
+    key: 'video-crop',
+    path: '/tools/video-crop',
+    name: '视频裁剪截取',
+    shortDesc: '本地批量按秒/百分比裁剪视频片段，自定义起点终点，无损截断或重编码截取',
+    category: 'media',
+    icon: '✂️',
+    title: '视频裁剪截取 按秒按时间段剪切 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线视频裁剪截取工具，纯前端本地处理，支持按秒精确裁剪与按百分比粗略裁剪两种模式，批量多文件统一时间段截取，截取后自动重编码保持兼容性。大文件大视频同样支持，无需上传视频到服务器。',
+    keywords: ['视频裁剪在线', '截取视频片段', '按秒剪切MP4', '批量裁剪视频', '视频开头结尾去掉', '网页截取短视频'],
+    features: [
+      '裁剪模式：按精确秒数（支持小数点后两位）或按整段百分比（如 10%~80%）',
+      '批量多文件统一时间段一次输出，自动 ZIP 打包下载',
+      '输出格式自适应浏览器最佳支持（MP4 优先），H5/PPT/微信均可直接播放',
+      '提供总时长预估预览提示，避免剪错区间',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地处理，视频不会上传任何服务器；长视频处理时间 ≈ 截取区间长度',
+      '⚠️ 裁剪不是流级别无损截断（避免复杂 demux），统一重编码输出；画质随压缩档位略有降低',
+      '⚠️ 输入视频损坏 / DRM 加密 / 浏览器不支持解码的编码（如 HEVC/H.265）可能无法处理',
+      '⚠️ 起始时间必须小于结束时间；起始时间为 0 或结束时间 = 总时长则表示保留对应端',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'video/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_视频裁剪结果',
+    defaultOptions: {
+      mode: 'seconds', // 'seconds' | 'percent'
+      startSec: 0,
+      endSec: 0, // 0 = 到末尾
+      startPercent: 0,
+      endPercent: 100,
+      quality: 'balanced', // crisp | balanced | extreme
+      outputFormat: 'auto',
+    },
+    processor: P.videoCrop,
+    showPreview: true,
+  },
+  'video-convert': {
+    key: 'video-convert',
+    path: '/tools/video-convert',
+    name: '视频格式转换',
+    shortDesc: '批量视频格式互转 MP4/WebM，浏览器原生编码，同步保留音轨',
+    category: 'media',
+    icon: '🔁',
+    title: '视频格式转换 在线 MP4 转 WebM 互转 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线视频格式转换工具，纯前端本地处理，支持常用视频批量转为 MP4 或 WebM 格式。调用浏览器原生 MediaRecorder 编码，不安装插件、不下载软件、不上传原文件。',
+    keywords: ['MP4转WebM在线', 'WebM转MP4', '视频格式批量转换', 'MOV转MP4浏览器', '本地视频转码'],
+    features: [
+      '一键批量将任意浏览器可解码的视频（含 MP4/MOV/WebM/AVI 部分）转为 MP4 或 WebM',
+      '三档码率可选：高清 / 标准 / 省流量，满足清晰度与体积平衡',
+      '自动保留音轨，音视频同步输出；无音频视频自动降级为无声输出',
+      '所有转码在您的浏览器内完成，原视频永远不会离开本机',
+    ],
+    boundaries: [
+      '⚠️ 本工具仅支持浏览器原生能解码的输入格式；MKV / HEVC(H.265) / ProRes / RMVB 等非标准格式请先转为 MP4(H.264) 后使用',
+      '⚠️ 「请求格式」不等于实际输出：不同浏览器 MediaRecorder 能力不同，若目标格式不支持会自动降级为兼容格式，并在结果中说明',
+      '⚠️ 不同浏览器支持范围：Safari 仅 MP4(H.264)；Chrome 推荐 MP4 或 WebM；Firefox 推荐 WebM',
+      '⚠️ 纯浏览器重编码时长 ≈ 视频实际时长；长视频请耐心等待并保持标签页前台运行',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'video/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_视频格式转换结果',
+    defaultOptions: {
+      format: 'mp4', // 'mp4' | 'webm'
+      quality: 'balanced',
+      audioBitrate: '128',
+    },
+    processor: P.videoConvert,
+    showPreview: true,
+  },
+  'audio-compress': {
+    key: 'audio-compress',
+    path: '/tools/audio-compress',
+    name: '音频压缩工具',
+    shortDesc: '纯前端本地批量压缩 MP3/WAV/M4A/OGG，码率/采样率自由设定',
+    category: 'media',
+    icon: '🎵',
+    title: '音频压缩 在线 MP3 码率压缩减小体积 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线音频压缩工具，纯前端本地处理，基于 Web Audio API + MediaRecorder 实现批量音频压缩，支持 32~320kbps 多档码率，可选采样率 48k/44.1k/22.05k，批量 ZIP 打包输出，文件不上传。',
+    keywords: ['音频压缩在线', 'MP3减小体积', 'WAV转MP3压缩', '批量压缩音频', '语音压缩发微信'],
+    features: [
+      '支持输入：MP3 / WAV / M4A(AAC) / OGG(Opus/Vorbis) / FLAC(浏览器可解码部分) / WEBA',
+      '码率档位：320kbps 高品质 / 192kbps 标准 / 128kbps 通用 / 64kbps 语音 / 32kbps 极致',
+      '可选采样率：48kHz（原声） / 44.1kHz（CD 级） / 22.05kHz（语音级） / 16kHz（电话级）',
+      '批量处理，自动 ZIP 打包，单文件直接下载，浏览器原生解码 0 插件',
+    ],
+    boundaries: [
+      '⚠️ 纯浏览器本地处理，音频不上传；但解码会占用一定内存，建议 ≤ 500MB / 单文件',
+      '⚠️ 输出格式为 WebM(Opus) / MP4(AAC) / WAV(PCM) 取决于浏览器；非 MP3。如需 MP3 请先确认目标场景支持 WebM/MP4',
+      '⚠️ 「码率」为目标码率，浏览器 MediaRecorder 可能轻微浮动，不作字节级精确保证',
+      '⚠️ 版权提示：请确保您拥有被处理音频的合法权利',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'audio/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_音频压缩结果',
+    defaultOptions: {
+      bitrate: '128', // '320' | '192' | '128' | '96' | '64' | '32'
+      sampleRate: '44100', // '48000' | '44100' | '22050' | '16000'
+      outputFormat: 'auto', // 'auto' | 'webm' | 'mp4' | 'wav'
+    },
+    processor: P.audioCompress,
+    showPreview: true,
+  },
+  'audio-crop': {
+    key: 'audio-crop',
+    path: '/tools/audio-crop',
+    name: '音频裁剪截取',
+    shortDesc: '批量按秒裁剪音频，自定义起点终点，可选淡入淡出，保留原音质',
+    category: 'media',
+    icon: '🎚️',
+    title: '音频裁剪截取 按秒剪切铃声语音 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线音频裁剪截取工具，纯前端本地处理，支持精确到 0.01 秒的时间区间截取。可选淡入淡出效果避免突然开关，批量多文件一次性截取 ZIP 下载，全程浏览器内完成。',
+    keywords: ['音频裁剪在线', 'MP3剪切工具', '制作手机铃声', '批量截取音频片段', '语音开头结尾去掉'],
+    features: [
+      '按精确秒数设置起止时间（0.01 秒精度），或用百分比模式粗略裁剪',
+      '可选淡入 0~3 秒、淡出 0~3 秒，铃声级体验无爆音',
+      '输出可选 WebM(Opus) / MP4(AAC) / 无损 WAV 16-bit PCM',
+      '批量处理 50+ 文件，自动命名（_clip 后缀），自动 ZIP 打包',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地处理，音频不上传服务器；长录音建议分批处理',
+      '⚠️ 起止时间必须在音频时长范围内；结束时间留 0 表示截取到末尾',
+      '⚠️ 输入 DRM 加密或浏览器不支持解码的格式（如 .aac 裸流）可能无法处理',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'audio/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_音频裁剪结果',
+    defaultOptions: {
+      mode: 'seconds', // 'seconds' | 'percent'
+      startSec: 0,
+      endSec: 0, // 0 表示到末尾
+      startPercent: 0,
+      endPercent: 100,
+      fadeIn: 0, // 0~3 seconds
+      fadeOut: 0,
+      outputFormat: 'auto', // 'auto' | 'wav' | 'webm' | 'mp4'
+      outputBitrate: '192', // 仅 webm/mp4 生效
+    },
+    processor: P.audioCrop,
+    showPreview: true,
+  },
+  'audio-convert': {
+    key: 'audio-convert',
+    path: '/tools/audio-convert',
+    name: '音频格式转换',
+    shortDesc: '批量音频格式互转 WAV/MP4(AAC)/WebM(Opus)，纯 Web Audio 解码重编码',
+    category: 'media',
+    icon: '🔀',
+    title: '音频格式转换 在线 WAV 转 M4A 互转 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线音频格式转换工具，纯前端本地处理，支持 MP3/WAV/M4A/OGG/FLAC 等浏览器可解码格式批量转为无损 WAV(16-bit PCM)、MP4(AAC)、WebM(Opus) 三种通用格式，全流程在浏览器中完成。',
+    keywords: ['音频格式转换在线', 'WAV转M4A', 'MP3转WAV', 'OGG转AAC', '批量音频转格式'],
+    features: [
+      '输入支持：MP3 / WAV / M4A(AAC) / OGG / FLAC / WEBA / AAC（浏览器解码能力为准）',
+      '输出 3 种通用格式：① WAV 16-bit PCM（无损，兼容所有系统）；② MP4(AAC)（Apple/微信生态最佳）；③ WebM(Opus)（同等码率下音质最高）',
+      '码率（非 WAV 模式）可选：64 / 96 / 128 / 192 / 256 / 320 kbps',
+      '批量多文件转换，自动 ZIP 打包；0 插件、0 上传、0 安装',
+    ],
+    boundaries: [
+      '⚠️ 输出格式不包含 MP3（浏览器 MediaRecorder 不原生支持 MP3 编码）；如需 MP3 请使用 LAME.js 或专业软件（本工具为轻量零依赖）',
+      '⚠️ 编码支持因浏览器而异：Safari 不支持 WebM(Opus)，自动降级为 MP4(AAC)；WAV 所有浏览器 100% 支持',
+      '⚠️ 输入 DRM 加密 / 损坏文件 / 非标准容器将直接报错并跳过；单文件建议 ≤ 1 小时时长',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'audio/*',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_音频格式转换结果',
+    defaultOptions: {
+      format: 'wav', // 'wav' | 'mp4' | 'webm'
+      bitrate: '192', // '64' | '96' | '128' | '192' | '256' | '320'
+      sampleRate: '44100',
+    },
+    processor: P.audioConvert,
+    showPreview: true,
+  },
 };
 
 export const TOOL_ROUTES = Object.values(TOOLS_CONFIG).map((t) => ({ key: t.key, path: t.path }));

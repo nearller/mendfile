@@ -1579,6 +1579,292 @@ function OptionsPanel(props: {
         </div>
       </div>
     ),
+    // =======================================================
+    // 批次 4 · 多媒体工具参数面板
+    // =======================================================
+    'video-compress': (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <Field label="压缩质量档位">
+          <select className="input" disabled={disabled} value={options.level || 'balanced'}
+            onChange={(e) => update({ level: e.target.value })}>
+            <option value="crisp">✨ 清晰（≈10Mbps，接近原画）</option>
+            <option value="balanced">⚖️ 均衡（≈5Mbps，推荐默认）</option>
+            <option value="extreme">🔥 极致（≈2.5Mbps，体积最小）</option>
+          </select>
+        </Field>
+        <Field label="分辨率缩放" hint="缩小分辨率可大幅减小体积">
+          <div className="flex flex-wrap gap-3 pt-1">
+            {[
+              { k: '100', label: '原始 100%' },
+              { k: '75', label: '75%' },
+              { k: '50', label: '50%' },
+            ].map((r) => (
+              <label key={r.k} className="inline-flex items-center gap-1.5 text-sm cursor-pointer">
+                <input type="radio" name={`vscale-${toolKey}`} value={r.k}
+                  checked={(options.scale || '100') === r.k} disabled={disabled}
+                  onChange={() => update({ scale: r.k })} />
+                {r.label}
+              </label>
+            ))}
+          </div>
+        </Field>
+        <Field label="音频码率">
+          <select className="input" disabled={disabled} value={options.audioBitrate || '128'}
+            onChange={(e) => update({ audioBitrate: e.target.value })}>
+            <option value="256">256 kbps（高品质）</option>
+            <option value="128">128 kbps（标准）</option>
+            <option value="96">96 kbps（紧凑）</option>
+            <option value="64">64 kbps（语音级）</option>
+          </select>
+        </Field>
+        <Field label="输出格式" hint="若浏览器不支持所选格式会自动降级">
+          <select className="input" disabled={disabled} value={options.outputFormat || 'auto'}
+            onChange={(e) => update({ outputFormat: e.target.value })}>
+            <option value="auto">🎯 自动（浏览器最佳）</option>
+            <option value="mp4">MP4（H.264，兼容性最好）</option>
+            <option value="webm">WebM（VP9，体积更小）</option>
+          </select>
+        </Field>
+      </div>
+    ),
+    'video-crop': (
+      <div className="space-y-4">
+        <Field label="裁剪模式">
+          <div className="flex flex-wrap gap-3">
+            {[
+              { k: 'seconds', label: '⏱️ 精确秒数（推荐，0.01s 精度）' },
+              { k: 'percent', label: '📊 百分比（粗略 10%~80%）' },
+            ].map((r) => (
+              <label key={r.k} className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                <input type="radio" name={`vcmode-${toolKey}`} value={r.k}
+                  checked={(options.mode || 'seconds') === r.k} disabled={disabled}
+                  onChange={() => update({ mode: r.k })} />
+                {r.label}
+              </label>
+            ))}
+          </div>
+        </Field>
+        {(options.mode || 'seconds') === 'seconds' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="起始时间（秒）" hint="0 表示从开头开始">
+              <input type="number" className="input" min={0} step={0.01}
+                value={options.startSec ?? 0} disabled={disabled}
+                onChange={(e) => update({ startSec: Math.max(0, Number(e.target.value) || 0) })} />
+            </Field>
+            <Field label="结束时间（秒）" hint="0 表示截取到视频末尾">
+              <input type="number" className="input" min={0} step={0.01}
+                value={options.endSec ?? 0} disabled={disabled}
+                onChange={(e) => update({ endSec: Math.max(0, Number(e.target.value) || 0) })} />
+            </Field>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={`起始位置 ${options.startPercent ?? 0}%`}>
+              <input type="range" min={0} max={100} step={1}
+                value={options.startPercent ?? 0} disabled={disabled}
+                onChange={(e) => update({ startPercent: Number(e.target.value) })} />
+            </Field>
+            <Field label={`结束位置 ${options.endPercent ?? 100}%`}>
+              <input type="range" min={0} max={100} step={1}
+                value={options.endPercent ?? 100} disabled={disabled}
+                onChange={(e) => update({ endPercent: Number(e.target.value) })} />
+            </Field>
+          </div>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="重编码质量">
+            <select className="input" disabled={disabled} value={options.quality || 'balanced'}
+              onChange={(e) => update({ quality: e.target.value })}>
+              <option value="crisp">✨ 清晰</option>
+              <option value="balanced">⚖️ 均衡（推荐）</option>
+              <option value="extreme">🔥 极致压缩</option>
+            </select>
+          </Field>
+          <Field label="输出格式">
+            <select className="input" disabled={disabled} value={options.outputFormat || 'auto'}
+              onChange={(e) => update({ outputFormat: e.target.value })}>
+              <option value="auto">🎯 自动（浏览器最佳）</option>
+              <option value="mp4">MP4（H.264）</option>
+              <option value="webm">WebM（VP9）</option>
+            </select>
+          </Field>
+        </div>
+      </div>
+    ),
+    'video-convert': (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <Field label="目标格式">
+          <select className="input" disabled={disabled} value={options.format || 'mp4'}
+            onChange={(e) => update({ format: e.target.value })}>
+            <option value="mp4">MP4（H.264，全平台兼容）</option>
+            <option value="webm">WebM（VP9，体积更小）</option>
+          </select>
+        </Field>
+        <Field label="转码质量">
+          <select className="input" disabled={disabled} value={options.quality || 'balanced'}
+            onChange={(e) => update({ quality: e.target.value })}>
+            <option value="crisp">✨ 高清（≈10Mbps）</option>
+            <option value="balanced">⚖️ 标准（≈5Mbps）</option>
+            <option value="extreme">🔻 省流量（≈2.5Mbps）</option>
+          </select>
+        </Field>
+        <Field label="音频码率">
+          <select className="input" disabled={disabled} value={options.audioBitrate || '128'}
+            onChange={(e) => update({ audioBitrate: e.target.value })}>
+            <option value="256">256 kbps 高品质</option>
+            <option value="192">192 kbps</option>
+            <option value="128">128 kbps 标准</option>
+            <option value="96">96 kbps</option>
+            <option value="64">64 kbps 语音</option>
+          </select>
+        </Field>
+      </div>
+    ),
+    'audio-compress': (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <Field label="目标码率">
+          <select className="input" disabled={disabled} value={options.bitrate || '128'}
+            onChange={(e) => update({ bitrate: e.target.value })}>
+            <option value="320">320 kbps（高品质音乐）</option>
+            <option value="192">192 kbps（标准）</option>
+            <option value="128">128 kbps（通用，推荐）</option>
+            <option value="96">96 kbps（紧凑）</option>
+            <option value="64">64 kbps（语音级）</option>
+            <option value="32">32 kbps（极致压缩）</option>
+          </select>
+        </Field>
+        <Field label="采样率">
+          <select className="input" disabled={disabled} value={options.sampleRate || '44100'}
+            onChange={(e) => update({ sampleRate: e.target.value })}>
+            <option value="48000">48 kHz（原声级）</option>
+            <option value="44100">44.1 kHz（CD 级，推荐）</option>
+            <option value="22050">22.05 kHz（语音级）</option>
+            <option value="16000">16 kHz（电话级）</option>
+          </select>
+        </Field>
+        <Field label="输出格式" hint="WAV 为无损 PCM；WebM/MP4 为压缩编码">
+          <select className="input" disabled={disabled} value={options.outputFormat || 'auto'}
+            onChange={(e) => update({ outputFormat: e.target.value })}>
+            <option value="auto">🎯 自动（浏览器最佳）</option>
+            <option value="webm">WebM（Opus 编码，体积最小）</option>
+            <option value="mp4">MP4（AAC 编码，Apple 生态）</option>
+            <option value="wav">WAV（无损 16-bit PCM）</option>
+          </select>
+        </Field>
+      </div>
+    ),
+    'audio-crop': (
+      <div className="space-y-4">
+        <Field label="裁剪模式">
+          <div className="flex flex-wrap gap-3">
+            {[
+              { k: 'seconds', label: '⏱️ 精确秒数（0.01s 精度，推荐）' },
+              { k: 'percent', label: '📊 百分比（粗略裁剪）' },
+            ].map((r) => (
+              <label key={r.k} className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                <input type="radio" name={`acmode-${toolKey}`} value={r.k}
+                  checked={(options.mode || 'seconds') === r.k} disabled={disabled}
+                  onChange={() => update({ mode: r.k })} />
+                {r.label}
+              </label>
+            ))}
+          </div>
+        </Field>
+        {(options.mode || 'seconds') === 'seconds' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="起始时间（秒）" hint="0 表示从开头开始">
+              <input type="number" className="input" min={0} step={0.01}
+                value={options.startSec ?? 0} disabled={disabled}
+                onChange={(e) => update({ startSec: Math.max(0, Number(e.target.value) || 0) })} />
+            </Field>
+            <Field label="结束时间（秒）" hint="0 表示截取到音频末尾">
+              <input type="number" className="input" min={0} step={0.01}
+                value={options.endSec ?? 0} disabled={disabled}
+                onChange={(e) => update({ endSec: Math.max(0, Number(e.target.value) || 0) })} />
+            </Field>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={`起始位置 ${options.startPercent ?? 0}%`}>
+              <input type="range" min={0} max={100} step={1}
+                value={options.startPercent ?? 0} disabled={disabled}
+                onChange={(e) => update({ startPercent: Number(e.target.value) })} />
+            </Field>
+            <Field label={`结束位置 ${options.endPercent ?? 100}%`}>
+              <input type="range" min={0} max={100} step={1}
+                value={options.endPercent ?? 100} disabled={disabled}
+                onChange={(e) => update({ endPercent: Number(e.target.value) })} />
+            </Field>
+          </div>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label={`淡入 ${options.fadeIn ?? 0} 秒`} hint="0 = 关闭，避免开头爆音，最大 3s">
+            <input type="range" min={0} max={3} step={0.1}
+              value={options.fadeIn ?? 0} disabled={disabled}
+              onChange={(e) => update({ fadeIn: Number(e.target.value) })} />
+          </Field>
+          <Field label={`淡出 ${options.fadeOut ?? 0} 秒`} hint="0 = 关闭，避免结尾突然截断">
+            <input type="range" min={0} max={3} step={0.1}
+              value={options.fadeOut ?? 0} disabled={disabled}
+              onChange={(e) => update({ fadeOut: Number(e.target.value) })} />
+          </Field>
+          <Field label="输出格式">
+            <select className="input" disabled={disabled} value={options.outputFormat || 'auto'}
+              onChange={(e) => update({ outputFormat: e.target.value })}>
+              <option value="auto">🎯 自动</option>
+              <option value="wav">WAV（无损 PCM）</option>
+              <option value="webm">WebM（Opus）</option>
+              <option value="mp4">MP4（AAC）</option>
+            </select>
+          </Field>
+          {(options.outputFormat || 'auto') !== 'wav' && (
+            <Field label="输出码率" hint="仅 WebM/MP4 生效">
+              <select className="input" disabled={disabled} value={options.outputBitrate || '192'}
+                onChange={(e) => update({ outputBitrate: e.target.value })}>
+                <option value="320">320 kbps</option>
+                <option value="256">256 kbps</option>
+                <option value="192">192 kbps（推荐）</option>
+                <option value="128">128 kbps</option>
+                <option value="96">96 kbps</option>
+                <option value="64">64 kbps</option>
+              </select>
+            </Field>
+          )}
+        </div>
+      </div>
+    ),
+    'audio-convert': (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <Field label="目标输出格式">
+          <select className="input" disabled={disabled} value={options.format || 'wav'}
+            onChange={(e) => update({ format: e.target.value })}>
+            <option value="wav">WAV 16-bit PCM（无损通用，推荐）</option>
+            <option value="mp4">MP4（AAC 编码，Apple/微信）</option>
+            <option value="webm">WebM（Opus 编码，高压缩比）</option>
+          </select>
+        </Field>
+        <Field label={`码率 ${options.bitrate || '192'} kbps`} hint="仅 MP4/WebM 生效；WAV 为无损不受影响">
+          <select className="input" disabled={disabled} value={options.bitrate || '192'}
+            onChange={(e) => update({ bitrate: e.target.value })}>
+            <option value="320">320 kbps（极致音质）</option>
+            <option value="256">256 kbps</option>
+            <option value="192">192 kbps（推荐）</option>
+            <option value="128">128 kbps</option>
+            <option value="96">96 kbps</option>
+            <option value="64">64 kbps（紧凑）</option>
+          </select>
+        </Field>
+        <Field label="采样率">
+          <select className="input" disabled={disabled} value={options.sampleRate || '44100'}
+            onChange={(e) => update({ sampleRate: e.target.value })}>
+            <option value="48000">48 kHz（原声）</option>
+            <option value="44100">44.1 kHz（CD 级）</option>
+            <option value="22050">22.05 kHz（语音）</option>
+            <option value="16000">16 kHz（电话级）</option>
+          </select>
+        </Field>
+      </div>
+    ),
   };
 
   if (!panels[toolKey]) return null;

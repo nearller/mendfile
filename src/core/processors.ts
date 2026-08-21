@@ -2617,3 +2617,618 @@ export const imageRemoveBg: ProcessFn = async ({ files, options }, onProgress) =
   return packImages(results, 'zip', 'MendFile_抠图结果', (r, m) => onProgress(0.85 + r * 0.12, m || '打包中'))
     .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
 };
+
+/* =======================================================
+ *  批次 4 · 多媒体轻量工具（6 个 · 纯 MediaRecorder + WebAudio）
+ *  不引入 ffmpeg.wasm；统一重编码时长 ≈ 音视频时长（实时近似）
+ * ======================================================= */
+
+/** 选择浏览器支持的最佳 MIME 类型，找不到则返回空串 */
+function pickSupportedMime(category: 'video' | 'audio', preferred: string): string {
+  const MR = (globalThis as any).MediaRecorder;
+  if (!MR || typeof MR.isTypeSupported !== 'function') return '';
+  const videoCandidates: string[] = [];
+  const audioCandidates: string[] = [];
+  if (preferred === 'mp4') {
+    videoCandidates.push('video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=h264,aac', 'video/mp4');
+    audioCandidates.push('audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac', 'audio/x-m4a');
+  } else if (preferred === 'webm') {
+    videoCandidates.push('video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm');
+    audioCandidates.push('audio/webm;codecs=opus', 'audio/webm');
+  } else {
+    // auto: 先 mp4 再 webm
+    videoCandidates.push(
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=h264,aac', 'video/mp4',
+      'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'
+    );
+    audioCandidates.push(
+      'audio/mp4;codecs=mp4a.40.2', 'audio/mp4',
+      'audio/webm;codecs=opus', 'audio/webm'
+    );
+  }
+  const list = category === 'video' ? videoCandidates : audioCandidates;
+  for (const m of list) { try { if (MR.isTypeSupported(m)) return m; } catch { /* ignore */ } }
+  return '';
+}
+
+/** 质量档位 → 视频目标码率（bits/s）· 按分辨率 1280×720 基准线性缩放 */
+function videoBitrateByLevel(level: string, basePixels: number): number {
+  // base: 921_600 px = 1280*720
+  const factor = Math.max(0.35, Math.min(3, basePixels / 921_600));
+  const baseMap: Record<string, number> = { crisp: 10_000_000, balanced: 5_000_000, extreme: 2_500_000 };
+  return Math.round((baseMap[level] ?? 5_000_000) * factor);
+}
+
+/** 等待 <video> 加载完元数据 */
+function waitVideoMeta(video: HTMLVideoElement, timeoutMs = 30_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('视频元数据加载超时（可能是损坏文件或浏览器不支持该编码）')), timeoutMs);
+    const done = () => { clearTimeout(timer); resolve(); };
+    if (video.readyState >= 1) return done();
+    video.addEventListener('loadedmetadata', done, { once: true });
+    video.addEventListener('error', () => { clearTimeout(timer); reject(new Error('视频解码失败：浏览器不支持此编码或文件损坏')); }, { once: true });
+  });
+}
+
+/** 等待 <video> seek 完成 */
+function waitSeeked(video: HTMLVideoElement, target: number, timeoutMs = 15_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('视频 Seek 超时')), timeoutMs);
+    const handler = () => {
+      clearTimeout(timer);
+      video.removeEventListener('seeked', handler);
+      resolve();
+    };
+    video.addEventListener('seeked', handler);
+    try { video.currentTime = target; }
+    catch (e) { clearTimeout(timer); reject(e as Error); }
+  });
+}
+
+/** 编码 AudioBuffer → WAV（16-bit PCM, mono/stereo） */
+function encodeWAV(buffer: AudioBuffer, sampleRateOverride?: number): Blob {
+  const sr = sampleRateOverride ?? buffer.sampleRate;
+  const numCh = Math.min(2, buffer.numberOfChannels);
+  // Resample by linear interpolation if rates differ (轻量近似；浏览器内置 decodeAudioData 通常已统一)
+  let length = buffer.length;
+  if (sampleRateOverride && sampleRateOverride !== buffer.sampleRate) {
+    length = Math.round(buffer.length * (sampleRateOverride / buffer.sampleRate));
+  }
+  const interleaved = new Int16Array(length * numCh);
+  for (let ch = 0; ch < numCh; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      const srcIdx = sampleRateOverride ? i * buffer.sampleRate / sampleRateOverride : i;
+      const i0 = Math.floor(srcIdx);
+      const frac = srcIdx - i0;
+      const a = data[Math.min(i0, data.length - 1)] ?? 0;
+      const b = data[Math.min(i0 + 1, data.length - 1)] ?? 0;
+      const s = Math.max(-1, Math.min(1, a + (b - a) * frac));
+      interleaved[i * numCh + ch] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+  }
+  const dataByteLen = interleaved.byteLength;
+  const ab = new ArrayBuffer(44 + dataByteLen);
+  const view = new DataView(ab);
+  const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  const blockAlign = numCh * 2;
+  const byteRate = sr * blockAlign;
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataByteLen, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numCh, true);
+  view.setUint32(24, sr, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true); // bits per sample
+  writeStr(36, 'data');
+  view.setUint32(40, dataByteLen, true);
+  // copy interleaved bytes
+  const bytes = new Uint8Array(ab, 44, dataByteLen);
+  bytes.set(new Uint8Array(interleaved.buffer, interleaved.byteOffset, dataByteLen));
+  return new Blob([ab], { type: 'audio/wav' });
+}
+
+/** 解码音频 File → AudioBuffer */
+async function decodeAudio(file: File): Promise<AudioBuffer> {
+  const buf = await readAsArrayBuffer(file);
+  const Ctx = (globalThis.AudioContext || (globalThis as any).webkitAudioContext) as typeof AudioContext;
+  if (!Ctx) throw new Error('当前浏览器不支持 Web Audio API');
+  const ctx = new Ctx();
+  try {
+    return await ctx.decodeAudioData(buf.slice(0));
+  } finally {
+    void ctx.close();
+  }
+}
+
+/** 裁剪并（可选）淡入淡出处理 AudioBuffer，返回新 AudioBuffer */
+function processAudioBuffer(
+  src: AudioBuffer,
+  opts: { startSec: number; endSec: number; fadeIn: number; fadeOut: number; targetSampleRate?: number }
+): AudioBuffer {
+  const sr = opts.targetSampleRate ?? src.sampleRate;
+  const totalLen = Math.round(src.duration * sr);
+  let start = Math.max(0, Math.round(opts.startSec * sr));
+  let end = opts.endSec <= 0 ? totalLen : Math.min(totalLen, Math.round(opts.endSec * sr));
+  if (end <= start) end = Math.min(totalLen, start + 1);
+  const len = end - start;
+  const Ctx = (globalThis.AudioContext || (globalThis as any).webkitAudioContext) as typeof AudioContext;
+  const ctx = new Ctx({ sampleRate: sr });
+  const out = ctx.createBuffer(src.numberOfChannels, len, sr);
+  void ctx.close();
+  const fi = Math.min(len, Math.max(0, Math.round(opts.fadeIn * sr)));
+  const fo = Math.min(len - fi, Math.max(0, Math.round(opts.fadeOut * sr)));
+  for (let ch = 0; ch < src.numberOfChannels; ch++) {
+    const s = src.getChannelData(ch);
+    const d = out.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      const srcIdx = start + i;
+      const ratio = sr / src.sampleRate;
+      // interpolated sampling across rate
+      const sf = srcIdx / ratio;
+      const i0 = Math.floor(sf);
+      const frac = sf - i0;
+      const a = s[Math.min(i0, s.length - 1)] ?? 0;
+      const b = s[Math.min(i0 + 1, s.length - 1)] ?? 0;
+      let v = a + (b - a) * frac;
+      if (i < fi) v *= i / Math.max(1, fi);
+      else if (i >= len - fo) { const t = (len - 1 - i) / Math.max(1, fo); v *= Math.max(0, t); }
+      d[i] = v;
+    }
+  }
+  return out;
+}
+
+/** AudioBuffer → 压缩后的 Blob，走 MediaRecorder（≈ 实时） */
+async function recordAudioBuffer(buffer: AudioBuffer, mime: string, bitrateBps: number): Promise<Blob> {
+  const Ctx = (globalThis.AudioContext || (globalThis as any).webkitAudioContext) as typeof AudioContext;
+  const ctx = new Ctx({ sampleRate: buffer.sampleRate });
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const dest = ctx.createMediaStreamDestination();
+  source.connect(dest);
+  source.connect(ctx.destination); // 不播放：实际可静音，保持链路
+  try {
+    const MR = (globalThis as any).MediaRecorder;
+    const recOptions: any = { mimeType: mime || undefined };
+    if (bitrateBps > 0) recOptions.audioBitsPerSecond = bitrateBps;
+    const rec = new MR(dest.stream, recOptions);
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e: any) => { if (e.data && e.data.size) chunks.push(e.data); };
+    const stopped = new Promise<Blob>((resolve, reject) => {
+      rec.onerror = (e: any) => reject(new Error('MediaRecorder 录制失败：' + (e?.message || 'unknown')));
+      rec.onstop = () => resolve(new Blob(chunks, { type: chunks[0]?.type || mime.split(';')[0] || 'audio/webm' }));
+    });
+    rec.start(250);
+    source.start(0);
+    // 保证播放与录制完整时长 + 尾部 250ms 余量
+    await new Promise<void>((res) => setTimeout(res, buffer.duration * 1000 + 350));
+    try { rec.stop(); } catch { /* ignore */ }
+    source.stop();
+    return await stopped;
+  } finally {
+    try { source.disconnect(); } catch { /* ignore */ }
+    void ctx.close();
+  }
+}
+
+/** 视频统一重编码 · 返回 Blob（带 canvas 缩放/录制时长） */
+async function processVideoFile(
+  file: File,
+  opts: {
+    startSec: number; endSec: number;
+    scalePct: number;
+    level: string;
+    audioBitrateKbps: number;
+    requestFmt: string; // 'auto' | 'mp4' | 'webm'
+    onTick?: (progress01: number, msg?: string) => void;
+  }
+): Promise<{ blob: Blob; actualMime: string; actualExt: string; info: Record<string, any> }> {
+  // 0) 准备
+  const video = document.createElement('video');
+  video.setAttribute('playsinline', 'true');
+  video.setAttribute('webkit-playsinline', 'true');
+  video.crossOrigin = 'anonymous';
+  video.muted = true;
+  video.controls = false;
+  video.preload = 'auto';
+  const url = URL.createObjectURL(file);
+  video.src = url;
+  await waitVideoMeta(video);
+
+  const duration = isFinite(video.duration) ? video.duration : 0;
+  const baseW = video.videoWidth || 0;
+  const baseH = video.videoHeight || 0;
+  if (baseW === 0 || baseH === 0) throw new Error('视频尺寸无效，可能是损坏文件或纯音频文件');
+
+  let startSec = Math.max(0, opts.startSec);
+  let endSec = opts.endSec <= 0 ? duration : Math.min(duration, opts.endSec);
+  if (endSec <= startSec + 0.05) { endSec = Math.min(duration, startSec + 0.5); if (endSec <= startSec) endSec = Math.min(duration, startSec + 1); }
+
+  const scale = Math.max(0.1, Math.min(1, opts.scalePct / 100));
+  let outW = Math.max(48, Math.round(baseW * scale));
+  let outH = Math.max(48, Math.round(baseH * scale));
+  if (outW % 2) outW -= 1; if (outH % 2) outH -= 1; // 编码偏好偶数
+  const basePixels = baseW * baseH;
+  const videoBitsPerSec = videoBitrateByLevel(opts.level, basePixels);
+  const audioBitsPerSec = Math.max(16_000, opts.audioBitrateKbps * 1000);
+
+  const fmtPref = opts.requestFmt === 'webm' ? 'webm' : 'mp4';
+  const mime = pickSupportedMime('video', opts.requestFmt === 'auto' ? 'auto' : fmtPref) || pickSupportedMime('video', 'auto');
+  if (!mime) throw new Error('当前浏览器 MediaRecorder 不支持任何视频编码，请升级到最新版 Chrome / Edge / Safari');
+
+  // 1) 创建 canvas + captureStream
+  const canvas = document.createElement('canvas');
+  canvas.width = outW; canvas.height = outH;
+  const cctx = canvas.getContext('2d')!;
+  const fps = 30;
+  const canvasStream = (canvas as any).captureStream ? (canvas as any).captureStream(fps) : (canvas as any).mozCaptureStream ? (canvas as any).mozCaptureStream(fps) : null;
+  if (!canvasStream) throw new Error('当前浏览器不支持 HTMLCanvasElement.captureStream，请升级浏览器');
+
+  // 2) 获取视频捕获的音频轨（如有）
+  let videoStream: MediaStream | null = null;
+  try { videoStream = (video as any).captureStream ? (video as any).captureStream() : (video as any).mozCaptureStream ? (video as any).mozCaptureStream() : null; } catch { /* ignore */ }
+  const audioTracks: MediaStreamTrack[] = [];
+  if (videoStream) for (const t of videoStream.getAudioTracks()) audioTracks.push(t);
+
+  // 合并
+  const combined = new MediaStream([
+    ...(canvasStream.getVideoTracks() || []),
+    ...audioTracks,
+  ]);
+
+  // 3) MediaRecorder
+  const MR = (globalThis as any).MediaRecorder;
+  const recOpts: any = { mimeType: mime, videoBitsPerSecond: videoBitsPerSec };
+  if (audioBitsPerSec > 0) recOpts.audioBitsPerSecond = audioBitsPerSec;
+  const recorder = new MR(combined, recOpts);
+  const chunks: Blob[] = [];
+  recorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+  const stoppedP = new Promise<Blob>((resolve, reject) => {
+    recorder.onerror = (e: any) => reject(new Error('视频录制失败：' + (e?.message || 'unknown')));
+    recorder.onstop = () => resolve(new Blob(chunks, { type: chunks[0]?.type || mime.split(';')[0] || 'video/webm' }));
+  });
+
+  // 4) Seek 到 start, play, draw 帧
+  await waitSeeked(video, startSec);
+  // 绘制首帧（防止首帧黑色）
+  cctx.drawImage(video, 0, 0, outW, outH);
+  video.muted = true;
+  try { await video.play(); } catch (e) { throw new Error('浏览器阻止自动播放，请使用 HTTPS 或最新版浏览器：' + ((e as Error)?.message || '')); }
+  recorder.start(500);
+
+  const totalTarget = endSec - startSec;
+  let stopped = false;
+  const stopAll = () => {
+    if (stopped) return;
+    stopped = true;
+    try { recorder.stop(); } catch { /* ignore */ }
+    try { video.pause(); } catch { /* ignore */ }
+  };
+
+  // 帧绘制循环：requestVideoFrameCallback 优先，退化为 rAF
+  const startWall = Date.now();
+  await new Promise<void>((resolve) => {
+    const draw = () => {
+      if (stopped) return;
+      cctx.drawImage(video, 0, 0, outW, outH);
+      const cur = video.currentTime;
+      const prog = Math.max(0, Math.min(1, totalTarget > 0 ? (cur - startSec) / totalTarget : 0));
+      if (opts.onTick) opts.onTick(prog, `录制中 ${(cur - startSec).toFixed(1)}s / ${totalTarget.toFixed(1)}s`);
+      if (cur >= endSec - 0.02 || video.ended) {
+        stopAll();
+        setTimeout(resolve, 350);
+        return;
+      }
+      // 超时保护：wall time > target*1.2 + 15s
+      if ((Date.now() - startWall) > totalTarget * 1200 + 15_000) {
+        stopAll();
+        setTimeout(resolve, 350);
+        return;
+      }
+      if ((video as any).requestVideoFrameCallback) {
+        (video as any).requestVideoFrameCallback(draw);
+      } else {
+        requestAnimationFrame(draw);
+      }
+    };
+    if ((video as any).requestVideoFrameCallback) {
+      (video as any).requestVideoFrameCallback(draw);
+    } else {
+      requestAnimationFrame(draw);
+    }
+    // safety timeout
+    setTimeout(() => { if (!stopped) { stopAll(); setTimeout(resolve, 400); } }, totalTarget * 1100 + 60_000);
+  });
+
+  const blob = await stoppedP;
+  // cleanup
+  try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+  combined.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+  canvasStream?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+  videoStream?.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+  (video as any).src = ''; try { video.load(); } catch { /* ignore */ }
+
+  const actualMime = blob.type || mime.split(';')[0];
+  const actualExt = actualMime.includes('mp4') ? 'mp4' : actualMime.includes('webm') ? 'webm' : (mime.includes('mp4') ? 'mp4' : 'webm');
+  const info: Record<string, any> = {
+    原始尺寸: `${baseW}×${baseH}px`, 原始时长: duration.toFixed(2) + 's',
+    输出尺寸: `${outW}×${outH}px`, 裁剪区间: `${startSec.toFixed(2)}s ~ ${endSec.toFixed(2)}s（共 ${totalTarget.toFixed(2)}s）`,
+    视频目标码率: (videoBitsPerSec / 1_000_000).toFixed(2) + ' Mbps',
+    音频目标码率: (audioBitsPerSec / 1000) + ' kbps',
+    使用MIME: mime, 实际输出MIME: actualMime,
+  };
+  return { blob, actualMime, actualExt, info };
+}
+
+/* ============ 4.1 视频压缩 ============ */
+export const videoCompress: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.01, '准备处理');
+  const level: string = options.level || 'balanced';
+  const scalePct = Number(options.scale ?? 100);
+  const audioBitrateKbps = Number(options.audioBitrate ?? 128);
+  const requestFmt: string = options.outputFormat || 'auto';
+  const results: { name: string; blob: Blob }[] = [];
+  const infos: Record<string, any>[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.85, `开始处理 ${fi + 1}/${files.length}：${f.name}`);
+    try {
+      const r = await processVideoFile(f, {
+        startSec: 0, endSec: 0, scalePct, level, audioBitrateKbps, requestFmt,
+        onTick: (subP, msg) => {
+          const base = 0.05 + (fi / files.length) * 0.85;
+          const span = 0.85 / files.length;
+          onProgress(Math.min(0.95, base + subP * span), `[${fi + 1}/${files.length}] ${msg || ''}`);
+        },
+      });
+      infos.push({ file: f.name, ...r.info, 输出大小: formatBytes(r.blob.size) });
+      results.push({ name: `${stripExt(safeName(f.name))}_compressed.${r.actualExt}`, blob: r.blob });
+    } catch (e: any) {
+      throw new Error(`处理「${f.name}」失败：${e?.message || String(e)}`);
+    }
+  }
+  const stats: Record<string, any> = {
+    处理文件: `${files.length} 个`,
+    质量档位: level === 'crisp' ? '清晰（≈10Mbps 基准）' : level === 'extreme' ? '极致（≈2.5Mbps 基准）' : '均衡（≈5Mbps 基准）',
+    缩放: `${scalePct}%`,
+    音频码率: `${audioBitrateKbps} kbps`,
+    请求格式: requestFmt === 'auto' ? '自动（浏览器最佳）' : requestFmt.toUpperCase(),
+    详情: infos.slice(0, 5).map((i) => `${i.file}：${i['输出大小']}`).join('；'),
+  };
+  return packImages(results, 'zip', 'MendFile_视频压缩结果', (r, m) => onProgress(0.88 + r * 0.1, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 4.2 视频裁剪截取 ============ */
+export const videoCrop: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.01, '准备处理');
+  const mode: string = options.mode || 'seconds';
+  const startSec = Math.max(0, Number(options.startSec ?? 0));
+  const endSec = Math.max(0, Number(options.endSec ?? 0));
+  const startPct = Math.max(0, Math.min(100, Number(options.startPercent ?? 0)));
+  const endPct = Math.max(0, Math.min(100, Number(options.endPercent ?? 100)));
+  const quality: string = options.quality || 'balanced';
+  const requestFmt: string = options.outputFormat || 'auto';
+
+  const results: { name: string; blob: Blob }[] = [];
+  const infos: Record<string, any>[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.85, `读取 ${fi + 1}/${files.length}：${f.name}`);
+    // 先加载元数据以计算 percent 模式下起止秒
+    const video = document.createElement('video');
+    video.muted = true; video.preload = 'auto'; video.crossOrigin = 'anonymous';
+    const url = URL.createObjectURL(f);
+    video.src = url;
+    let duration = 0;
+    try { await waitVideoMeta(video); duration = isFinite(video.duration) ? video.duration : 0; }
+    finally { try { URL.revokeObjectURL(url); } catch { /* ignore */ } (video as any).src = ''; }
+    let ss = startSec, ee = endSec;
+    if (mode === 'percent') {
+      ss = duration * (startPct / 100);
+      ee = duration * (endPct / 100);
+    }
+    try {
+      const r = await processVideoFile(f, {
+        startSec: ss, endSec: ee, scalePct: 100, level: quality,
+        audioBitrateKbps: 160, requestFmt,
+        onTick: (subP, msg) => {
+          const base = 0.05 + (fi / files.length) * 0.85;
+          const span = 0.85 / files.length;
+          onProgress(Math.min(0.95, base + subP * span), `[${fi + 1}/${files.length}] ${msg || ''}`);
+        },
+      });
+      infos.push({ file: f.name, 原始时长: duration.toFixed(2) + 's', ...r.info, 输出大小: formatBytes(r.blob.size) });
+      results.push({ name: `${stripExt(safeName(f.name))}_clip.${r.actualExt}`, blob: r.blob });
+    } catch (e: any) {
+      throw new Error(`处理「${f.name}」失败：${e?.message || String(e)}`);
+    }
+  }
+  const stats: Record<string, any> = {
+    处理文件: `${files.length} 个`,
+    裁剪模式: mode === 'percent' ? `百分比区间 ${startPct}% ~ ${endPct}%` : `精确秒数 ${startSec}s ~ ${endSec === 0 ? '末尾' : endSec + 's'}`,
+    重编码质量: quality === 'crisp' ? '清晰' : quality === 'extreme' ? '极致' : '均衡',
+    详情: infos.slice(0, 5).map((i) => `${i.file}：${i.裁剪区间} → ${i['输出大小']}`).join('；'),
+  };
+  return packImages(results, 'zip', 'MendFile_视频裁剪结果', (r, m) => onProgress(0.88 + r * 0.1, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 4.3 视频格式转换 ============ */
+export const videoConvert: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.01, '准备处理');
+  const format: string = options.format || 'mp4';
+  const quality: string = options.quality || 'balanced';
+  const audioBitrateKbps = Number(options.audioBitrate ?? 128);
+  const results: { name: string; blob: Blob }[] = [];
+  const infos: Record<string, any>[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.85, `转码 ${fi + 1}/${files.length}：${f.name}`);
+    try {
+      const r = await processVideoFile(f, {
+        startSec: 0, endSec: 0, scalePct: 100, level: quality, audioBitrateKbps, requestFmt: format,
+        onTick: (subP, msg) => {
+          const base = 0.05 + (fi / files.length) * 0.85;
+          const span = 0.85 / files.length;
+          onProgress(Math.min(0.95, base + subP * span), `[${fi + 1}/${files.length}] ${msg || ''}`);
+        },
+      });
+      infos.push({ file: f.name, 原始类型: f.type || '未知', 请求格式: format, 实际格式: r.actualExt.toUpperCase(), 输出大小: formatBytes(r.blob.size) });
+      results.push({ name: `${stripExt(safeName(f.name))}.${r.actualExt}`, blob: r.blob });
+    } catch (e: any) {
+      throw new Error(`处理「${f.name}」失败：${e?.message || String(e)}`);
+    }
+  }
+  const stats: Record<string, any> = {
+    处理文件: `${files.length} 个`,
+    请求格式: format.toUpperCase(),
+    质量档位: quality === 'crisp' ? '高清' : quality === 'extreme' ? '省流量' : '标准',
+    音频码率: `${audioBitrateKbps} kbps`,
+    说明: '若浏览器不支持请求格式会自动降级为兼容编码，并在"实际格式"中体现',
+    详情: infos.slice(0, 5).map((i) => `${i.file}：${i['原始类型']} → ${i.实际格式} (${i['输出大小']})`).join('；'),
+  };
+  return packImages(results, 'zip', 'MendFile_视频格式转换结果', (r, m) => onProgress(0.88 + r * 0.1, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 4.4 音频压缩 ============ */
+export const audioCompress: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  const bitrateKbps = Number(options.bitrate ?? 128);
+  const sampleRate = Number(options.sampleRate ?? 44100);
+  const outputFormat: string = options.outputFormat || 'auto';
+  const results: { name: string; blob: Blob }[] = [];
+  const infos: Record<string, any>[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.82, `解码 ${fi + 1}/${files.length}：${f.name}`);
+    const buffer = await decodeAudio(f);
+    const processed = processAudioBuffer(buffer, { startSec: 0, endSec: 0, fadeIn: 0, fadeOut: 0, targetSampleRate: sampleRate });
+    let blob: Blob; let ext: string;
+    if (outputFormat === 'wav') {
+      blob = encodeWAV(processed, sampleRate); ext = 'wav';
+    } else {
+      const pref = outputFormat === 'mp4' ? 'mp4' : outputFormat === 'webm' ? 'webm' : 'auto';
+      const mime = pickSupportedMime('audio', pref) || pickSupportedMime('audio', 'auto');
+      if (!mime) { blob = encodeWAV(processed, sampleRate); ext = 'wav'; }
+      else {
+        onProgress(0.05 + (fi / files.length) * 0.82 + 0.15, `编码 ${fi + 1}/${files.length}（约 ${processed.duration.toFixed(0)}s）`);
+        blob = await recordAudioBuffer(processed, mime, bitrateKbps * 1000);
+        ext = blob.type.includes('webm') ? 'webm' : blob.type.includes('mp4') || blob.type.includes('m4a') ? 'm4a' : (mime.includes('webm') ? 'webm' : 'm4a');
+        if (ext === 'm4a' && (blob.type.includes('webm'))) ext = 'webm';
+        if (ext === 'm4a') ext = 'mp4'; // 统一 mp4 后缀更通用
+      }
+    }
+    infos.push({ file: f.name, 原始大小: formatBytes(f.size), 输出大小: formatBytes(blob.size), 输出格式: ext.toUpperCase(), 码率: `${bitrateKbps} kbps`, 采样率: `${sampleRate} Hz` });
+    results.push({ name: `${stripExt(safeName(f.name))}_compressed.${ext}`, blob });
+  }
+  const stats: Record<string, any> = {
+    处理文件: `${files.length} 个`,
+    码率: `${bitrateKbps} kbps`,
+    采样率: `${sampleRate} Hz`,
+    输出模式: outputFormat === 'wav' ? 'WAV(PCM无损)' : outputFormat,
+    详情: infos.slice(0, 5).map((i) => `${i.file}：${i['原始大小']} → ${i['输出大小']} (${i.输出格式})`).join('；'),
+  };
+  return packImages(results, 'zip', 'MendFile_音频压缩结果', (r, m) => onProgress(0.88 + r * 0.1, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 4.5 音频裁剪截取 ============ */
+export const audioCrop: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  const mode: string = options.mode || 'seconds';
+  let startSec = Math.max(0, Number(options.startSec ?? 0));
+  let endSec = Math.max(0, Number(options.endSec ?? 0));
+  const startPct = Math.max(0, Math.min(100, Number(options.startPercent ?? 0)));
+  const endPct = Math.max(0, Math.min(100, Number(options.endPercent ?? 100)));
+  const fadeIn = Math.max(0, Math.min(3, Number(options.fadeIn ?? 0)));
+  const fadeOut = Math.max(0, Math.min(3, Number(options.fadeOut ?? 0)));
+  const outputFormat: string = options.outputFormat || 'auto';
+  const outputBitrate = Number(options.outputBitrate ?? 192);
+
+  const results: { name: string; blob: Blob }[] = [];
+  const infos: Record<string, any>[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.82, `解码 ${fi + 1}/${files.length}：${f.name}`);
+    const buffer = await decodeAudio(f);
+    const dur = buffer.duration;
+    let ss = startSec, ee = endSec;
+    if (mode === 'percent') { ss = dur * (startPct / 100); ee = dur * (endPct / 100); }
+    const processed = processAudioBuffer(buffer, { startSec: ss, endSec: ee, fadeIn, fadeOut });
+    let blob: Blob; let ext: string;
+    if (outputFormat === 'wav') {
+      blob = encodeWAV(processed); ext = 'wav';
+    } else {
+      const pref = outputFormat === 'mp4' ? 'mp4' : outputFormat === 'webm' ? 'webm' : 'auto';
+      const mime = pickSupportedMime('audio', pref) || pickSupportedMime('audio', 'auto');
+      if (!mime) { blob = encodeWAV(processed); ext = 'wav'; }
+      else {
+        onProgress(0.05 + (fi / files.length) * 0.82 + 0.15, `编码 ${fi + 1}/${files.length}（约 ${processed.duration.toFixed(0)}s）`);
+        blob = await recordAudioBuffer(processed, mime, outputBitrate * 1000);
+        ext = blob.type.includes('webm') ? 'webm' : 'mp4';
+      }
+    }
+    infos.push({ file: f.name, 原始时长: dur.toFixed(2) + 's', 裁剪区间: `${ss.toFixed(2)}s ~ ${ee <= 0 ? '末尾' : ee.toFixed(2) + 's'}`, 淡入淡出: `${fadeIn}s / ${fadeOut}s`, 输出大小: formatBytes(blob.size), 输出格式: ext.toUpperCase() });
+    results.push({ name: `${stripExt(safeName(f.name))}_clip.${ext}`, blob });
+  }
+  const stats: Record<string, any> = {
+    处理文件: `${files.length} 个`,
+    裁剪模式: mode === 'percent' ? `按百分比 ${startPct}% ~ ${endPct}%` : `按秒 ${startSec}s ~ ${endSec <= 0 ? '末尾' : endSec + 's'}`,
+    淡入淡出: `${fadeIn}s / ${fadeOut}s`,
+    详情: infos.slice(0, 5).map((i) => `${i.file}：${i.裁剪区间} (${i.输出格式} · ${i['输出大小']})`).join('；'),
+  };
+  return packImages(results, 'zip', 'MendFile_音频裁剪结果', (r, m) => onProgress(0.88 + r * 0.1, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 4.6 音频格式转换 ============ */
+export const audioConvert: ProcessFn = async ({ files, options }, onProgress) => {
+  onProgress(0.02, '准备处理');
+  const format: string = options.format || 'wav';
+  const bitrateKbps = Number(options.bitrate ?? 192);
+  const sampleRate = Number(options.sampleRate ?? 44100);
+  const results: { name: string; blob: Blob }[] = [];
+  const infos: Record<string, any>[] = [];
+  for (let fi = 0; fi < files.length; fi++) {
+    const f = files[fi];
+    onProgress(0.05 + (fi / files.length) * 0.82, `解码 ${fi + 1}/${files.length}：${f.name}`);
+    const buffer = await decodeAudio(f);
+    const processed = processAudioBuffer(buffer, { startSec: 0, endSec: 0, fadeIn: 0, fadeOut: 0, targetSampleRate: sampleRate });
+    let blob: Blob; let ext: string;
+    if (format === 'wav') {
+      blob = encodeWAV(processed, sampleRate); ext = 'wav';
+    } else {
+      const mime = pickSupportedMime('audio', format);
+      if (!mime) {
+        // 浏览器不支持请求的压缩格式 → 降级 WAV 并在详情中注明
+        blob = encodeWAV(processed, sampleRate); ext = 'wav';
+        infos.push({ file: f.name, 原始: f.type || '未知', 请求: format.toUpperCase(), 实际: 'WAV (降级：浏览器不支持请求编码)', 大小: formatBytes(blob.size) });
+      } else {
+        onProgress(0.05 + (fi / files.length) * 0.82 + 0.15, `编码 ${fi + 1}/${files.length}（约 ${processed.duration.toFixed(0)}s）`);
+        blob = await recordAudioBuffer(processed, mime, bitrateKbps * 1000);
+        ext = blob.type.includes('webm') ? 'webm' : 'mp4';
+        infos.push({ file: f.name, 原始: f.type || '未知', 请求: format.toUpperCase(), 实际: ext.toUpperCase(), 码率: `${bitrateKbps} kbps`, 采样率: `${sampleRate} Hz`, 大小: formatBytes(blob.size) });
+      }
+    }
+    if (!infos[infos.length - 1] || infos[infos.length - 1].file !== f.name) {
+      infos.push({ file: f.name, 原始: f.type || '未知', 请求: format.toUpperCase(), 实际: ext.toUpperCase(), 采样率: `${sampleRate} Hz`, 大小: formatBytes(blob.size) });
+    }
+    results.push({ name: `${stripExt(safeName(f.name))}.${ext}`, blob });
+  }
+  const stats: Record<string, any> = {
+    处理文件: `${files.length} 个`,
+    请求格式: format.toUpperCase(),
+    码率: format === 'wav' ? '无损 PCM 16-bit' : `${bitrateKbps} kbps`,
+    采样率: `${sampleRate} Hz`,
+    详情: infos.slice(0, 5).map((i) => `${i.file}：${i.原始} → ${i.实际} (${i.大小})`).join('；'),
+  };
+  return packImages(results, 'zip', 'MendFile_音频格式转换结果', (r, m) => onProgress(0.88 + r * 0.1, m || '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};

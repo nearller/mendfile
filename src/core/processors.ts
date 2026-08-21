@@ -30,6 +30,8 @@ import { pdfjsLib } from './pdfjs';
 // @ts-ignore - qrcode-generator 官方未独立发布 .d.ts，按运行时 API 使用
 import qrcode from 'qrcode-generator';
 import jsQR from 'jsqr';
+// 批次 5 · 繁简字库（文本工具用）
+import { toSimplified, toTraditional, getDictSize } from '@/vendor/trad-simp';
 
 /**
  * 把 pdf-lib 返回的 Uint8Array 转成 Blob 兼容类型。
@@ -3231,4 +3233,519 @@ export const audioConvert: ProcessFn = async ({ files, options }, onProgress) =>
   };
   return packImages(results, 'zip', 'MendFile_音频格式转换结果', (r, m) => onProgress(0.88 + r * 0.1, m || '打包中'))
     .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 5.1 文本批量处理 ============ */
+export const textProcess: ProcessFn = async ({ files, options }, onProgress) => {
+  const mode: string = options.mode || 'clean';
+  const results: { name: string; blob: Blob }[] = [];
+  const infos: Record<string, any>[] = [];
+
+  // ---- clean helpers ----
+  const cleanText = (t: string, opt: any): string => {
+    let s = t;
+    if (opt.fullwidthToHalf) {
+      // 全角→半角（字母/数字/空格/标点）
+      s = s.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+      s = s.replace(/　/g, ' ');
+    }
+    if (opt.removeAllSpaces) {
+      s = s.replace(/[ \t\u3000]+/g, '');
+    } else {
+      if (opt.trimEach) {
+        s = s.split('\n').map((ln) => ln.replace(/^[ \t]+|[ \t]+$/g, '')).join('\n');
+      }
+    }
+    if (opt.removeBlankLines) {
+      s = s.replace(/\n{2,}/g, '\n').replace(/^\n+|\n+$/g, '');
+    }
+    return s;
+  };
+  // ---- mask helpers ----
+  const maskText = (t: string, opt: any): string => {
+    let s = t;
+    if (opt.maskPhone) {
+      s = s.replace(/(\+?86[-\s]?)?1[3-9]\d{9}/g, (m) => {
+        const digits = m.replace(/\D/g, '');
+        const len = digits.length;
+        if (len === 11) return digits.slice(0, 3) + '****' + digits.slice(7);
+        return m.slice(0, Math.max(0, m.length - 8)) + '****' + m.slice(Math.max(0, m.length - 4));
+      });
+    }
+    if (opt.maskEmail) {
+      s = s.replace(/([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g, (_, u, d) => {
+        const name = u.length <= 2 ? u : (u[0] + '*'.repeat(Math.max(2, u.length - 2)) + u[u.length - 1]);
+        return `${name}@${d}`;
+      });
+    }
+    if (opt.maskIdCard) {
+      s = s.replace(/\b[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[0-9Xx]\b/g, (m) =>
+        m.slice(0, 4) + '**********' + m.slice(14)
+      );
+      s = s.replace(/\b[1-9]\d{5}\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}\b/g, (m) =>
+        m.slice(0, 3) + '********' + m.slice(12)
+      );
+    }
+    if (opt.maskBank) {
+      s = s.replace(/\b[3-6]\d{15,18}\b/g, (m) =>
+        m.slice(0, 4) + ' **** **** ' + m.slice(m.length - 4)
+      );
+    }
+    return s;
+  };
+
+  // ---- diff helper (LCS-based unified diff) ----
+  const doDiff = (a: string, b: string, mode: string): string => {
+    const la = a.split(/\r?\n/), lb = b.split(/\r?\n/);
+    const n = la.length, m = lb.length;
+    const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = la[i] === lb[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+    const out: string[] = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (la[i] === lb[j]) { out.push(`  ${la[i]}`); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push(`- ${la[i]}`); i++; }
+      else { out.push(`+ ${lb[j]}`); j++; }
+    }
+    while (i < n) { out.push(`- ${la[i]}`); i++; }
+    while (j < m) { out.push(`+ ${lb[j]}`); j++; }
+    return `--- 原始 (${n} 行)\n+++ 新文件 (${m} 行)\n\n` + out.join('\n');
+  };
+
+  if (mode === 'diff') {
+    onProgress(0.1, '读取文件中');
+    if (files.length < 2) throw new Error('差异对比需要两个文件（原始 vs 新文件）');
+    const fa = await files[0].text(), fb = await files[1].text();
+    onProgress(0.5, '差异计算中');
+    const result = doDiff(fa, fb, options.diffMode || 'unified');
+    const blob = new Blob([result], { type: 'text/plain;charset=utf-8' });
+    infos.push({ 原始: files[0].name, 新文件: files[1].name, 差异行数: result.split('\n').filter(l => /^[+-]/.test(l)).length });
+    onProgress(0.95, '打包中');
+    return packImages([{ name: `${stripExt(files[0].name || 'diff')}_vs_${stripExt(files[1].name) || 'diff'}.diff.txt`, blob }], 'zip', 'MendFile_文本差异结果', (r) => onProgress(0.95 + r * 0.05))
+      .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), 详情: infos } } }));
+  }
+
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    onProgress((i / files.length) * 0.8, `处理 ${i + 1}/${files.length}：${f.name}`);
+    let text;
+    try { text = await f.text(); } catch { text = ''; }
+    let out = text, action = '';
+    if (mode === 'clean') { out = cleanText(text, options); action = '清洗'; }
+    else if (mode === 'mask') { out = maskText(text, options); action = '脱敏'; }
+    else if (mode === 'trad') {
+      out = options.tradDirection === 't2s' ? toSimplified(text) : toTraditional(text);
+      action = options.tradDirection === 't2s' ? '繁转简' : '简转繁';
+    }
+    const blob = new Blob([out], { type: 'text/plain;charset=utf-8' });
+    results.push({ name: `${stripExt(safeName(f.name))}_${action}.txt`, blob });
+    infos.push({ file: f.name, 操作: action, 原始: formatBytes(f.size), 处理后: formatBytes(blob.size) });
+  }
+  const stats: Record<string, any> = {
+    模式: mode === 'clean' ? '清洗' : mode === 'mask' ? '脱敏' : mode === 'trad' ? `繁简转换(${options.tradDirection === 't2s' ? '繁→简' : '简→繁'}，收录${getDictSize()}字)` : '差异对比',
+    处理文件: `${files.length} 个`,
+    详情: infos.slice(0, 5).map((i) => `${i.file}（${i.操作}，${i.原始} → ${i.处理后}）`).join('；'),
+  };
+  return packImages(results, 'zip', 'MendFile_文本处理结果', (r) => onProgress(0.8 + r * 0.2, '打包中'))
+    .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
+};
+
+/* ============ 5.2 工时计算与薪资 ============ */
+export const workHours: ProcessFn = async ({ options }, onProgress) => {
+  onProgress(0.1, '计算中');
+  const mode: string = options.mode || 'single';
+  const lines: string[] = [];
+  lines.push('======================================================');
+  lines.push(' MendFile 工时计算与薪资报告');
+  lines.push(` 生成时间：${new Date().toLocaleString('zh-CN')}`);
+  lines.push('======================================================');
+
+  const hmToMin = (s: string): number => {
+    const [h, m] = String(s || '0:0').split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  const minToHm = (m: number): string => {
+    const sign = m < 0 ? '-' : '';
+    m = Math.abs(Math.round(m));
+    return `${sign}${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`;
+  };
+
+  const calOne = (ws: string, we: string, ls: string, le: string, label: string) => {
+    const wsm = hmToMin(ws), wem = hmToMin(we);
+    const lsm = hmToMin(ls), lem = hmToMin(le);
+    let total = wem - wsm;
+    if (total <= 0) total += 24 * 60; // 跨天
+    // 午休重叠扣除
+    let overlap = 0;
+    if (lem > lsm && wem > wsm) {
+      const s = Math.max(wsm, lsm), e = Math.min(wem, lem);
+      overlap = Math.max(0, e - s);
+    }
+    const workMin = total - overlap;
+    return { label, totalMin: total, lunchMin: overlap, workMin };
+  };
+
+  const hourlyMode: string = options.salaryMode || 'hourly';
+  const workDays = Number(options.workDaysPerMonth) || 22;
+  let hourlyRate = Number(options.hourlyRate) || 0;
+  if (hourlyMode === 'monthly') {
+    const monthly = Number(options.monthlyRate) || 0;
+    hourlyRate = monthly / workDays / 8;
+  }
+  lines.push(`【薪资设置】模式：${hourlyMode === 'monthly' ? '月薪反推时薪' : '直接时薪'}；时薪：¥${hourlyRate.toFixed(2)}/h`);
+  if (hourlyMode === 'monthly') lines.push(`  → 月薪 ¥${Number(options.monthlyRate) || 0} ÷ ${workDays} 天/月 ÷ 8h/天 = ¥${hourlyRate.toFixed(2)}/h`);
+
+  const rate15 = options.overtime15 ? 1.5 : 1;
+  const rate20 = options.overtime20 ? 2 : 1;
+  const rate30 = options.overtime30 ? 3 : 1;
+  lines.push(`【加班倍率】工作日 ${rate15}x / 周末 ${rate20}x / 节假日 ${rate30}x`);
+  lines.push('------------------------------------------------------');
+
+  const processRow = (row: { date?: string; ws: string; we: string; type?: string }) => {
+    const r = calOne(row.ws, row.we, options.lunchStart || '12:00', options.lunchEnd || '13:00', row.date || '单日');
+    const stdMin = 8 * 60;
+    const normalMin = Math.min(r.workMin, stdMin);
+    const otMin = Math.max(0, r.workMin - stdMin);
+    const type = row.type || 'normal';
+    const otRate = type === 'holiday' ? rate30 : type === 'weekend' ? rate20 : rate15;
+    const salary = (normalMin / 60) * hourlyRate + (otMin / 60) * hourlyRate * otRate;
+    return { ...r, normalMin, otMin, otRate, salary };
+  };
+
+  let grandSalary = 0, grandMin = 0;
+  if (mode === 'single') {
+    const r = processRow({ ws: options.workStart || '09:00', we: options.workEnd || '18:00' });
+    lines.push(`【单日工时】上班 ${options.workStart} → 下班 ${options.workEnd}（午休 ${minToHm(r.lunchMin)} 扣除）`);
+    lines.push(`  · 总时长 ${minToHm(r.totalMin)}，有效工时 ${minToHm(r.workMin)}`);
+    lines.push(`  · 标准工时 ${minToHm(r.normalMin)} + 加班 ${minToHm(r.otMin)} ×${r.otRate}`);
+    lines.push(`  · 本日应得薪资：¥${r.salary.toFixed(2)}`);
+    grandSalary = r.salary; grandMin = r.workMin;
+  } else {
+    const raw = String(options.batchData || '').trim();
+    if (!raw) throw new Error('批量模式请粘贴 CSV 打卡数据（每行：日期,上班,下班,类型）');
+    const rows = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    lines.push(`【批量模式】共 ${rows.length} 条打卡记录`);
+    lines.push('------------------------------------------------------');
+    for (const row of rows) {
+      const parts = row.split(/[,\t]/).map(x => x.trim());
+      const date = parts[0] || '';
+      const ws = parts[1] || '09:00', we = parts[2] || '18:00';
+      const type = (parts[3] || '').toLowerCase();
+      try {
+        const r = processRow({ date, ws, we, type });
+        lines.push(`✓ ${date}：${ws}→${we} 有效 ${minToHm(r.workMin)}，加班 ${minToHm(r.otMin)}，薪资 ¥${r.salary.toFixed(2)}`);
+        grandSalary += r.salary; grandMin += r.workMin;
+      } catch (e: any) {
+        lines.push(`✗ ${date}：解析失败 - ${e?.message || e}`);
+      }
+    }
+  }
+  lines.push('------------------------------------------------------');
+  lines.push(`【合计】有效总工时：${minToHm(grandMin)}（${(grandMin / 60).toFixed(2)} 小时）`);
+  lines.push(`【合计】应付总薪资：¥${grandSalary.toFixed(2)}`);
+  lines.push('');
+  lines.push('※ 本报告不含个税、社保扣除，仅供参考。');
+
+  onProgress(0.9, '生成报告');
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const stats = { 总工时: `${(grandMin / 60).toFixed(2)}h`, 总薪资: `¥${grandSalary.toFixed(2)}`, 模式: mode === 'single' ? '单日' : '批量' };
+  return {
+    blob,
+    fileName: 'MendFile_工时计算报告',
+    ext: 'txt',
+    preview: { stats },
+  };
+};
+
+/* ============ 5.3 时间戳转换 ============ */
+export const timestampConvert: ProcessFn = async ({ options }, onProgress) => {
+  onProgress(0.1, '转换中');
+  const mode: string = options.mode || 'ts2date';
+  const lines: string[] = [];
+  lines.push('======================================================');
+  lines.push(' MendFile 时间戳转换报告');
+  lines.push(` 生成时间：${new Date().toLocaleString('zh-CN')}`);
+  lines.push('======================================================');
+
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  const fmtAll = (d: Date) => {
+    const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    const utc = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+    const bj = new Date(d.getTime() + 8 * 3600 * 1000);
+    const bjStr = `${bj.getUTCFullYear()}-${pad(bj.getUTCMonth() + 1)}-${pad(bj.getUTCDate())} ${pad(bj.getUTCHours())}:${pad(bj.getUTCMinutes())}:${pad(bj.getUTCSeconds())} GMT+8`;
+    return { local, utc, bj: bjStr };
+  };
+  const isNum = (s: string) => /^-?\d+$/.test(s.trim());
+
+  if (mode === 'batch') {
+    const raw = String(options.batchInput || '').trim();
+    if (!raw) throw new Error('批量模式请粘贴多行输入（每行一个时间戳或日期）');
+    const rows = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    lines.push(`【批量模式】${rows.length} 条输入`);
+    lines.push('------------------------------------------------------');
+    for (const line of rows) {
+      if (isNum(line)) {
+        const n = Number(line);
+        const isMs = String(Math.abs(n)).length >= 13;
+        const ms = isMs ? n : n * 1000;
+        const d = new Date(ms);
+        const f = fmtAll(d);
+        lines.push(`• 输入: ${line} (${isMs ? '毫秒' : '秒'})`);
+        lines.push(`   本地: ${f.local}   UTC: ${f.utc}   北京时间: ${f.bj}`);
+      } else {
+        const d = new Date(line.replace(/-/g, '/'));
+        if (isNaN(d.getTime())) {
+          lines.push(`• 输入: ${line} → ✗ 解析失败`);
+          continue;
+        }
+        const sec = Math.floor(d.getTime() / 1000);
+        const ms = d.getTime();
+        const f = fmtAll(d);
+        lines.push(`• 输入: ${line}`);
+        lines.push(`   秒级时间戳: ${sec}   毫秒级: ${ms}`);
+        lines.push(`   本地: ${f.local}   UTC: ${f.utc}   北京时间: ${f.bj}`);
+      }
+    }
+  } else if (mode === 'date2ts') {
+    const dt = String(options.dateTime || '').trim();
+    const d = new Date(dt.replace(/-/g, '/'));
+    if (isNaN(d.getTime())) throw new Error('日期格式无法解析，请使用 YYYY-MM-DD HH:mm:ss');
+    const sec = Math.floor(d.getTime() / 1000);
+    const ms = d.getTime();
+    const f = fmtAll(d);
+    lines.push(`【日期 → 时间戳】输入: ${dt}`);
+    lines.push(`  秒级（10位）:  ${sec}`);
+    lines.push(`  毫秒级（13位）: ${ms}`);
+    lines.push(`  本地时区:  ${f.local}`);
+    lines.push(`  UTC:  ${f.utc}`);
+    lines.push(`  北京时间: ${f.bj}`);
+  } else {
+    const raw = String(options.timestamp || '').trim();
+    if (!isNum(raw)) throw new Error('请输入纯数字时间戳（10位秒 or 13位毫秒）');
+    const n = Number(raw);
+    const isMs = String(Math.abs(n)).length >= 13;
+    const ms = isMs ? n : n * 1000;
+    const d = new Date(ms);
+    const f = fmtAll(d);
+    lines.push(`【时间戳 → 日期】输入: ${raw}  (${isMs ? '毫秒级 13 位' : '秒级 10 位'})`);
+    lines.push(`  本地时区:  ${f.local}`);
+    lines.push(`  UTC:  ${f.utc}`);
+    lines.push(`  北京时间: ${f.bj}`);
+    lines.push(`  ISO 8601: ${d.toISOString()}`);
+    lines.push(`  相对时间: 距现在 ${((Date.now() - ms) / 1000 >= 0 ? Math.floor((Date.now() - ms) / 1000) + ' 秒前' : Math.floor((ms - Date.now()) / 1000) + ' 秒后')}`);
+  }
+
+  onProgress(0.95, '生成报告');
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  return { blob, fileName: 'MendFile_时间戳转换结果', ext: 'txt' };
+};
+
+/* ============ 5.4 密码生成器 ============ */
+export const passwordGenerate: ProcessFn = async ({ options }, onProgress) => {
+  onProgress(0.1, '使用 window.crypto 生成安全随机序列');
+
+  let len = Math.max(4, Math.min(128, Number(options.length) || 16));
+  const count = Math.max(1, Math.min(1000, Number(options.count) || 1));
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnpqrstuvwxyz';
+  const number = '23456789';
+  const symbolOrig = String(options.customSymbols || '!@#$%^&*()-_=+[]{};:,.<>?');
+  let symbols = symbolOrig;
+  if (options.excludeAmbiguous) {
+    symbols = symbols.replace(/[|oO0\\/`'"]/g, '');
+  }
+
+  let pool = '';
+  const needEach = !!options.requireEachType;
+  const pools: string[] = [];
+  if (options.includeUpper) { pool += upper; pools.push(upper); }
+  if (options.includeLower) { pool += lower; pools.push(lower); }
+  if (options.includeNumber) { pool += number; pools.push(number); }
+  if (options.includeSymbol && symbols) { pool += symbols; pools.push(symbols); }
+  if (!pool) throw new Error('请至少勾选一种字符类型（大写/小写/数字/符号）');
+
+  if (needEach && pools.length > len) len = pools.length;
+  const pick = (src: string): string => {
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    return src.charAt(arr[0] % src.length);
+  };
+  const pwds: string[] = [];
+  for (let i = 0; i < count; i++) {
+    onProgress(0.1 + (i / count) * 0.8, `生成 ${i + 1}/${count}`);
+    let pwd = '';
+    if (needEach) {
+      for (const p of pools) pwd += pick(p);
+    }
+    while (pwd.length < len) pwd += pick(pool);
+    // 随机打乱
+    const arr = pwd.split('');
+    const rnd = new Uint32Array(arr.length);
+    crypto.getRandomValues(rnd);
+    for (let k = arr.length - 1; k > 0; k--) {
+      const j = rnd[k] % (k + 1);
+      [arr[k], arr[j]] = [arr[j], arr[k]];
+    }
+    pwds.push(arr.join(''));
+  }
+  onProgress(0.92, '写入报告');
+  const lines = [
+    `MendFile 密码生成报告（crypto 级随机）`,
+    `生成时间: ${new Date().toLocaleString('zh-CN')}`,
+    `长度: ${len}  数量: ${count}  字符池大小: ${pool.length}`,
+    `包含: ${[options.includeUpper && '大写', options.includeLower && '小写', options.includeNumber && '数字', options.includeSymbol && '符号'].filter(Boolean).join('/')}`,
+    `排除易混字符: ${options.excludeAmbiguous ? '是' : '否'}   每类至少一个: ${needEach ? '是' : '否'}`,
+    '------------------------------------------------------',
+    ...pwds.map((p, i) => `${String(i + 1).padStart(4, ' ')}   ${p}`),
+    '',
+    '※ 请妥善保管生成的密码，切勿粘贴到公共场合。',
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const stats = { 生成: `${count} 条`, 长度: `${len} 位`, 字符池: pool.length.toString() };
+  // 预览
+  const previewPwds = pwds.slice(0, 10).map((p, i) => `#${i + 1} ${p}`).join('； ');
+  return { blob, fileName: 'MendFile_生成密码', ext: 'txt', preview: { stats: { ...stats, 前10条: previewPwds } } };
+};
+
+/* ============ 5.5 单位换算器 ============ */
+export const unitConvert: ProcessFn = async ({ options }, onProgress) => {
+  onProgress(0.1, '加载换算规则');
+
+  // 换算表：单位key -> [label, toBaseFactor]（温度特殊处理）
+  const TABLES: Record<string, Record<string, { label: string; to: (v: number) => number; from: (v: number) => number }>> = {
+    length: {
+      m: { label: '米 (m)', to: v => v, from: v => v },
+      km: { label: '千米/公里 (km)', to: v => v * 1000, from: v => v / 1000 },
+      cm: { label: '厘米 (cm)', to: v => v * 0.01, from: v => v / 0.01 },
+      mm: { label: '毫米 (mm)', to: v => v * 0.001, from: v => v / 0.001 },
+      inch: { label: '英寸 (in)', to: v => v * 0.0254, from: v => v / 0.0254 },
+      ft: { label: '英尺 (ft)', to: v => v * 0.3048, from: v => v / 0.3048 },
+      yd: { label: '码 (yd)', to: v => v * 0.9144, from: v => v / 0.9144 },
+      mi: { label: '英里 (mi)', to: v => v * 1609.344, from: v => v / 1609.344 },
+      li: { label: '里（中国市制）', to: v => v * 500, from: v => v / 500 },
+      zhang: { label: '丈', to: v => v * (10 / 3), from: v => v / (10 / 3) },
+      chi: { label: '尺', to: v => v * (1 / 3), from: v => v / (1 / 3) },
+    },
+    weight: {
+      kg: { label: '千克/公斤 (kg)', to: v => v, from: v => v },
+      g: { label: '克 (g)', to: v => v * 0.001, from: v => v / 0.001 },
+      mg: { label: '毫克 (mg)', to: v => v * 1e-6, from: v => v / 1e-6 },
+      t: { label: '吨 (t)', to: v => v * 1000, from: v => v / 1000 },
+      lb: { label: '磅 (lb)', to: v => v * 0.45359237, from: v => v / 0.45359237 },
+      oz: { label: '盎司 (oz)', to: v => v * 0.028349523125, from: v => v / 0.028349523125 },
+      jin: { label: '斤（市斤）', to: v => v * 0.5, from: v => v / 0.5 },
+      liang: { label: '两', to: v => v * 0.05, from: v => v / 0.05 },
+      ct: { label: '克拉 (ct)', to: v => v * 0.0002, from: v => v / 0.0002 },
+    },
+    volume: {
+      L: { label: '升 (L)', to: v => v, from: v => v },
+      mL: { label: '毫升 (mL)', to: v => v * 0.001, from: v => v / 0.001 },
+      m3: { label: '立方米 (m³)', to: v => v * 1000, from: v => v / 1000 },
+      gal_us: { label: '美制加仑 (gal US)', to: v => v * 3.785411784, from: v => v / 3.785411784 },
+      gal_uk: { label: '英制加仑 (gal UK)', to: v => v * 4.54609, from: v => v / 4.54609 },
+      pt_us: { label: '美制品脱 (pt)', to: v => v * 0.473176473, from: v => v / 0.473176473 },
+      cup: { label: '杯 (cup, 240mL)', to: v => v * 0.24, from: v => v / 0.24 },
+      tbsp: { label: '汤匙 (Tbsp, 15mL)', to: v => v * 0.015, from: v => v / 0.015 },
+    },
+    temp: {
+      C: { label: '摄氏度 (℃)', to: v => v, from: v => v },
+      F: { label: '华氏度 (℉)', to: v => ((v - 32) * 5) / 9, from: v => (v * 9) / 5 + 32 },
+      K: { label: '开尔文 (K)', to: v => v - 273.15, from: v => v + 273.15 },
+    },
+    area: {
+      m2: { label: '平方米 (㎡)', to: v => v, from: v => v },
+      km2: { label: '平方千米 (km²)', to: v => v * 1e6, from: v => v / 1e6 },
+      ha: { label: '公顷 (ha)', to: v => v * 10000, from: v => v / 10000 },
+      mu: { label: '亩（市亩）', to: v => v * (10000 / 15), from: v => v / (10000 / 15) },
+      ft2: { label: '平方英尺 (sq ft)', to: v => v * 0.09290304, from: v => v / 0.09290304 },
+      in2: { label: '平方英寸 (sq in)', to: v => v * 0.00064516, from: v => v / 0.00064516 },
+      acre: { label: '英亩 (acre)', to: v => v * 4046.8564224, from: v => v / 4046.8564224 },
+    },
+    time: {
+      s: { label: '秒 (s)', to: v => v, from: v => v },
+      ms: { label: '毫秒 (ms)', to: v => v * 0.001, from: v => v / 0.001 },
+      min: { label: '分钟 (min)', to: v => v * 60, from: v => v / 60 },
+      h: { label: '小时 (h)', to: v => v * 3600, from: v => v / 3600 },
+      d: { label: '天 (day)', to: v => v * 86400, from: v => v / 86400 },
+      wk: { label: '周 (week)', to: v => v * 604800, from: v => v / 604800 },
+      mo: { label: '月（30天）', to: v => v * 2592000, from: v => v / 2592000 },
+      yr: { label: '年（365天）', to: v => v * 31536000, from: v => v / 31536000 },
+    },
+    storage: {
+      B: { label: '字节 (B)', to: v => v, from: v => v },
+      KB: { label: '千字节 (KB)', to: v => v * 1024, from: v => v / 1024 },
+      MB: { label: '兆字节 (MB)', to: v => v * 1024 * 1024, from: v => v / (1024 * 1024) },
+      GB: { label: '吉字节 (GB)', to: v => v * 1024 ** 3, from: v => v / (1024 ** 3) },
+      TB: { label: '太字节 (TB)', to: v => v * 1024 ** 4, from: v => v / (1024 ** 4) },
+      PB: { label: '拍字节 (PB)', to: v => v * 1024 ** 5, from: v => v / (1024 ** 5) },
+      Kb: { label: '千比特 (Kbit)', to: v => v * 128, from: v => v / 128 },
+      Mb: { label: '兆比特 (Mbit)', to: v => v * 128 * 1024, from: v => v / (128 * 1024) },
+    },
+    energy: {
+      J: { label: '焦耳 (J)', to: v => v, from: v => v },
+      kJ: { label: '千焦 (kJ)', to: v => v * 1000, from: v => v / 1000 },
+      cal: { label: '卡路里 (cal)', to: v => v * 4.184, from: v => v / 4.184 },
+      kcal: { label: '大卡/千卡 (kcal)', to: v => v * 4184, from: v => v / 4184 },
+      Wh: { label: '瓦时 (Wh)', to: v => v * 3600, from: v => v / 3600 },
+      kWh: { label: '千瓦时/度 (kWh)', to: v => v * 3_600_000, from: v => v / 3_600_000 },
+      BTU: { label: '英热单位 (BTU)', to: v => v * 1055.05585262, from: v => v / 1055.05585262 },
+    },
+  };
+  const CAT_LABELS: Record<string, string> = {
+    length: '长度', weight: '重量/质量', volume: '体积/容量', temp: '温度',
+    area: '面积', time: '时间', storage: '数据存储', energy: '能量/热量',
+  };
+
+  const cat: string = options.category || 'length';
+  const tbl = TABLES[cat];
+  if (!tbl) throw new Error('未知类别');
+
+  const fromUnit: string = options.fromUnit || Object.keys(tbl)[0];
+  const toUnit: string = options.toUnit || Object.keys(tbl)[1] || Object.keys(tbl)[0];
+  const prec = Math.max(0, Math.min(12, Number(options.precision) || 4));
+  const fromDef = tbl[fromUnit] || tbl[Object.keys(tbl)[0]];
+  const toDef = tbl[toUnit] || tbl[Object.keys(tbl)[Object.keys(tbl).length - 1]];
+  const conv = (v: number) => toDef.from(fromDef.to(v));
+
+  const lines: string[] = [
+    '======================================================',
+    ' MendFile 单位换算结果',
+    ` 类别：${CAT_LABELS[cat] || cat}   精度：${prec} 位小数`,
+    ` 生成时间：${new Date().toLocaleString('zh-CN')}`,
+    '======================================================',
+  ];
+
+  const batch = options.batchMode && String(options.batchInput || '').trim();
+  if (batch) {
+    const rows = batch.split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean);
+    lines.push(`【批量模式】${rows.length} 条  ${fromDef.label} → ${toDef.label}`);
+    lines.push('------------------------------------------------------');
+    for (const line of rows) {
+      const v = parseFloat(line);
+      if (isNaN(v)) { lines.push(`✗ ${line} 非数字`); continue; }
+      const r = conv(v);
+      lines.push(`  ${v} ${fromUnit}  =  ${Number(r.toFixed(prec))} ${toUnit}`);
+    }
+  } else {
+    const v = parseFloat(String(options.value || '0'));
+    if (isNaN(v)) throw new Error('请输入数值');
+    const r = conv(v);
+    lines.push(`【单次换算】${v} ${fromDef.label}  →  ${toDef.label}`);
+    lines.push('');
+    lines.push(`  结果：${Number(r.toFixed(prec))} ${toUnit}`);
+    lines.push('');
+    // 输出同类所有单位对照
+    lines.push('【同类单位一键对照】');
+    const baseVal = fromDef.to(v);
+    for (const k of Object.keys(tbl)) {
+      const def = tbl[k];
+      const val = def.from(baseVal);
+      lines.push(`  ${Number(val.toFixed(prec))} ${def.label}`);
+    }
+  }
+  onProgress(0.95, '生成报告');
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  return { blob, fileName: 'MendFile_单位换算结果', ext: 'txt' };
 };

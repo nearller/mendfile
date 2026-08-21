@@ -1056,6 +1056,216 @@ export const TOOLS_CONFIG: Record<string, ToolConfig> = {
     processor: P.audioConvert,
     showPreview: true,
   },
+  // =======================================================
+  // 批次 5 · 办公小工具合集（office 分类 · 5 工具）
+  // fileRequired=false 表示不需要上传文件，直接配置参数即可生成
+  // =======================================================
+  'text-process': {
+    key: 'text-process',
+    path: '/tools/text-process',
+    name: '文本批量处理',
+    shortDesc: '批量 TXT 处理：去空格、脱敏（手机号/邮箱/身份证）、繁简互转、差异对比',
+    category: 'office',
+    icon: '📝',
+    title: '文本批量处理 去空格脱敏繁简转换差异对比 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线文本批量处理工具，纯前端本地处理，支持 TXT/CSV/JSON 等文本文件批量操作：去首尾空格/全角空格/空行、手机号邮箱身份证号正则脱敏打码、繁简字双向转换、双文件差异对比。文件不上传、无次数限制。',
+    keywords: ['文本去空格', '手机号脱敏', '繁简转换在线', '文本差异对比', '批量TXT处理', '邮箱打码工具'],
+    features: [
+      '清洗类：去首尾空格 / 去所有空格 / 去除空行 / 全角转半角 / Tab 转空格',
+      '脱敏类：手机号(11位)、邮箱(@)、身份证号(18/15位)自动打码为 138****1234 形式',
+      '字库类：2000+ 常用字繁简双向映射（简→繁、繁→简），生僻字保留原样',
+      '对比类：双文件逐行差异对比输出差异报告（支持两个文本文件输入）',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地处理，文本内容不会上传任何服务器；浏览器单次处理建议单文件 ≤ 50MB',
+      '⚠️ 脱敏基于正则匹配，非常规格式手机号/邮箱（如带国家码、带中文名备注）可能漏匹配，建议复核关键数据',
+      '⚠️ 繁简转换基于静态 2000+ 常用字库，古文、异体字、多对多映射（如「头发/出发」的「发」）可能存在歧义',
+      '⚠️ 差异对比基于 LCS 算法，超 10 万行文本建议本地桌面工具',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: '.txt,.csv,.json,.md,.log,.srt',
+    multiple: true,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_文本处理结果',
+    defaultOptions: {
+      mode: 'clean', // 'clean' | 'mask' | 'trad' | 'diff'
+      // clean
+      trimEach: true,
+      removeBlankLines: true,
+      fullwidthToHalf: false,
+      removeAllSpaces: false,
+      // mask
+      maskPhone: true,
+      maskEmail: true,
+      maskIdCard: true,
+      maskBank: false,
+      // trad
+      tradDirection: 's2t', // 's2t' | 't2s'
+      // diff
+      diffMode: 'unified', // 'unified' | 'side'
+    },
+    processor: P.textProcess,
+    showPreview: true,
+  },
+  'work-hours': {
+    key: 'work-hours',
+    path: '/tools/work-hours',
+    name: '工时计算与薪资',
+    shortDesc: '上下班打卡工时结算：自定义上班/下班时间、午休扣除、加班倍率、工资日结月结',
+    category: 'office',
+    icon: '⏰',
+    title: '工时计算 工资结算加班统计 自定义打卡 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线工时计算工具，纯前端本地运算，支持自定义上班/下班/午休时间、工作日历、加班倍率（1.5x/2x/3x）、月薪/时薪自动换算，一键导出 CSV 供 Excel 导入。无需上传打卡记录，所有运算浏览器内完成。',
+    keywords: ['工时计算器', '日结工资计算', '加班小时统计', '打卡工时结算', '时薪月薪换算', '上下班打卡计算'],
+    features: [
+      '单日工时：上班时间 / 下班时间 / 午休扣除精确到分钟，自动计算有效工时',
+      '批量多日：粘贴 30 天打卡记录（CSV 格式：日期,上班,下班），一次性批量结算',
+      '薪资模式：月薪→时薪反推；或输入时薪+加班倍率自动算日结/月结',
+      '一键导出 CSV / TXT 报告，直接复制到 Excel 或发送 HR',
+    ],
+    boundaries: [
+      '⚠️ 纯前端计算，所有数据仅保存在您当前页面，刷新即清空；敏感薪资请自行截图保存或导出文件备份',
+      '⚠️ 工资计算不含个税、社保公积金扣除；若需精确报税请使用专业 HR 系统',
+      '⚠️ 法定节假日加班工资规则按中国劳动法通用倍率默认，各地细则有差异请人工核对',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: '',
+    fileRequired: false,
+    multiple: false,
+    outputExt: 'txt',
+    outputFileName: 'MendFile_工时计算报告',
+    defaultOptions: {
+      mode: 'single', // 'single' | 'batch'
+      workStart: '09:00',
+      workEnd: '18:00',
+      lunchStart: '12:00',
+      lunchEnd: '13:00',
+      salaryMode: 'hourly', // 'hourly' | 'monthly'
+      hourlyRate: 30,
+      monthlyRate: 8000,
+      workDaysPerMonth: 22,
+      overtime15: true, // 工作日加班 1.5x
+      overtime20: false, // 周末 2x
+      overtime30: false, // 法定假日 3x
+      batchData: '', // CSV 格式多行文本
+    },
+    processor: P.workHours,
+    showPreview: true,
+  },
+  'timestamp': {
+    key: 'timestamp',
+    path: '/tools/timestamp',
+    name: '时间戳转换',
+    shortDesc: 'Unix 时间戳 ↔ 日期时间 双向互转，秒级毫秒级自动识别，多时区批量',
+    category: 'office',
+    icon: '🕒',
+    title: '时间戳转换 Unix时间戳日期双向转换 批量 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线时间戳转换工具，纯前端本地处理。支持 10 位（秒）/13 位（毫秒）时间戳自动识别，日期→时间戳正反向转换，批量多行一次处理，自动显示 UTC/北京时区结果，支持复制。',
+    keywords: ['时间戳转换', 'Unix时间戳', '10位13位时间戳', '日期转时间戳', '时间戳转日期', '批量时间转换'],
+    features: [
+      '自动识别：10 位秒级 / 13 位毫秒级，输入即解析无需手动切换',
+      '双向转换：时间戳 → 多种格式日期；日期字符串 → 秒/毫秒时间戳',
+      '批量多行：粘贴 100 行时间戳或日期一次性全部转换',
+      '时区提示：同时展示 UTC / 北京时间 / 本地时区',
+    ],
+    boundaries: [
+      '⚠️ 所有时间计算基于浏览器本地时区；跨时区开发请手动核对 UTC 偏移',
+      '⚠️ 1970 年以前（负时间戳）及 2038 年以后（32位溢出）的日期，不同语言解析结果不同，建议人工校验',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: '',
+    fileRequired: false,
+    multiple: false,
+    outputExt: 'txt',
+    outputFileName: 'MendFile_时间戳转换结果',
+    defaultOptions: {
+      mode: 'ts2date', // 'ts2date' | 'date2ts' | 'batch'
+      timestamp: Math.floor(Date.now() / 1000).toString(),
+      dateTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      batchInput: '',
+    },
+    processor: P.timestampConvert,
+    showPreview: true,
+  },
+  'password-generator': {
+    key: 'password-generator',
+    path: '/tools/password-generator',
+    name: '密码生成器',
+    shortDesc: '高安全随机密码批量生成：大小写数字符号、排除易混字符、自定义规则、直接下载',
+    category: 'office',
+    icon: '🔐',
+    title: '密码生成器 在线高安全随机密码批量生成 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线密码生成器，纯前端本地 crypto 级随机数生成（window.crypto.getRandomValues），支持大小写字母、数字、特殊符号自由组合，排除易混字符 I/l/1/O/0，可批量生成 1~1000 条直接下载 TXT。所有密码在您的浏览器生成从不联网。',
+    keywords: ['随机密码生成', '强密码在线生成', '批量密码生成器', 'WiFi密码生成', '密码自定义规则'],
+    features: [
+      'window.crypto 加密级随机数（非 Math.random），符合安全标准',
+      '长度 4~128 位；大小写 / 数字 / 符号 四类字符可自由勾选',
+      '排除易混字符（I、l、1、|、O、0、o）避免手写识别错误',
+      '批量 1~1000 条一次生成，直接复制或一键下载 TXT',
+    ],
+    boundaries: [
+      '⚠️ 纯前端生成，密码不经过任何服务器；但生成后请妥善保存，请勿贴到公共论坛或聊天记录',
+      '⚠️ 「至少包含每类各一个」模式下，若总长度小于类别数会自动延长到最小长度',
+      '⚠️ 本工具不提供密码存储功能（不建后端），请使用专业密码管理器（Bitwarden/1Password）保存',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: '',
+    fileRequired: false,
+    multiple: false,
+    outputExt: 'txt',
+    outputFileName: 'MendFile_生成密码',
+    defaultOptions: {
+      length: 16,
+      count: 5,
+      includeUpper: true,
+      includeLower: true,
+      includeNumber: true,
+      includeSymbol: true,
+      excludeAmbiguous: true,
+      requireEachType: true,
+      customSymbols: '!@#$%^&*()-_=+[]{};:,.<>?',
+    },
+    processor: P.passwordGenerate,
+    showPreview: true,
+  },
+  'unit-convert': {
+    key: 'unit-convert',
+    path: '/tools/unit-convert',
+    name: '单位换算器',
+    shortDesc: '长度重量体积温度面积时间数据存储货币 8 大类常用单位互转，批量表格',
+    category: 'office',
+    icon: '📐',
+    title: '单位换算器 长度重量温度面积存储批量换算 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线单位换算工具，纯前端本地计算。覆盖 8 大类常用单位：长度（米/英寸/英尺/公里/里）、重量（千克/磅/斤/盎司）、体积（升/加仑/立方米）、温度（℃/℉/K）、面积（㎡/亩/公顷/平方英尺）、时间（秒/分/时/天/周）、数据存储（B/KB/MB/GB/TB）、能量（卡路里/焦耳）。批量输入一次换算。',
+    keywords: ['单位换算器', '米转英寸', '公斤转磅', '摄氏度华氏度转换', 'GB MB换算', '亩平方米换算'],
+    features: [
+      '8 大类 80+ 常用单位：长度 / 重量 / 体积 / 温度 / 面积 / 时间 / 存储 / 能量',
+      '每类一键切换目标单位，实时双向换算，输入即出结果',
+      '批量模式：粘贴 100 行数值一次完成换算，导出 TXT/CSV',
+      '高精度 12 位小数，四舍五入可自定义',
+    ],
+    boundaries: [
+      '⚠️ 所有换算基于国际标准定义；英制与公制换算中，部分国家地区有细微差异（如美制加仑 vs 英制加仑）已在选项中标注',
+      '⚠️ 货币汇率仅提供静态示例（为了零后端），实时汇率请使用专业财经工具',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: '',
+    fileRequired: false,
+    multiple: false,
+    outputExt: 'txt',
+    outputFileName: 'MendFile_单位换算结果',
+    defaultOptions: {
+      category: 'length', // length | weight | volume | temp | area | time | storage | energy
+      fromUnit: 'm',
+      toUnit: 'inch',
+      value: '1',
+      precision: 4,
+      batchMode: false,
+      batchInput: '',
+    },
+    processor: P.unitConvert,
+    showPreview: true,
+  },
 };
 
 export const TOOL_ROUTES = Object.values(TOOLS_CONFIG).map((t) => ({ key: t.key, path: t.path }));

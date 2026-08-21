@@ -1865,6 +1865,404 @@ function OptionsPanel(props: {
         </Field>
       </div>
     ),
+    // =======================================================
+    // 批次 5 · 办公小工具合集参数面板
+    // =======================================================
+    'text-process': (
+      <div className="space-y-4">
+        <Field label="处理模式">
+          <div className="flex flex-wrap gap-3">
+            {[
+              { k: 'clean', label: '🧹 文本清洗（去空格/空行/全角）' },
+              { k: 'mask', label: '🛡️ 信息脱敏（手机/邮箱/身份证/银行卡打码）' },
+              { k: 'trad', label: '🀄 繁简转换（2000+ 常用字双向）' },
+              { k: 'diff', label: '🔍 差异对比（LCS 算法，需传 2 个文件）' },
+            ].map((r) => (
+              <label key={r.k} className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                <input type="radio" name={`tpmode-${toolKey}`} value={r.k}
+                  checked={(options.mode || 'clean') === r.k} disabled={disabled}
+                  onChange={() => update({ mode: r.k })} />
+                {r.label}
+              </label>
+            ))}
+          </div>
+        </Field>
+        {(options.mode || 'clean') === 'clean' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Field label="每行去首尾空格">
+              <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+                <input type="checkbox" className="rounded" checked={options.trimEach !== false} disabled={disabled}
+                  onChange={(e) => update({ trimEach: e.target.checked })} />
+                开启（推荐）
+              </label>
+            </Field>
+            <Field label="去除空行（含纯空格行）">
+              <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+                <input type="checkbox" className="rounded" checked={options.removeBlankLines !== false} disabled={disabled}
+                  onChange={(e) => update({ removeBlankLines: e.target.checked })} />
+                开启
+              </label>
+            </Field>
+            <Field label="全角 → 半角（字母/数字/空格）">
+              <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+                <input type="checkbox" className="rounded" checked={!!options.fullwidthToHalf} disabled={disabled}
+                  onChange={(e) => update({ fullwidthToHalf: e.target.checked })} />
+                开启
+              </label>
+            </Field>
+            <Field label="去除所有空格/Tab（含中间）">
+              <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+                <input type="checkbox" className="rounded" checked={!!options.removeAllSpaces} disabled={disabled}
+                  onChange={(e) => update({ removeAllSpaces: e.target.checked })} />
+                谨慎开启（会删除中间空格）
+              </label>
+            </Field>
+          </div>
+        )}
+        {(options.mode || 'clean') === 'mask' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Field label="手机号（11位）打码">
+              <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+                <input type="checkbox" className="rounded" checked={options.maskPhone !== false} disabled={disabled}
+                  onChange={(e) => update({ maskPhone: e.target.checked })} />
+                138****1234
+              </label>
+            </Field>
+            <Field label="邮箱 (@) 打码">
+              <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+                <input type="checkbox" className="rounded" checked={options.maskEmail !== false} disabled={disabled}
+                  onChange={(e) => update({ maskEmail: e.target.checked })} />
+                z***e@domain.com
+              </label>
+            </Field>
+            <Field label="身份证号（18/15位）打码">
+              <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+                <input type="checkbox" className="rounded" checked={options.maskIdCard !== false} disabled={disabled}
+                  onChange={(e) => update({ maskIdCard: e.target.checked })} />
+                1101**********1234
+              </label>
+            </Field>
+            <Field label="银行卡号（16~19位）打码">
+              <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+                <input type="checkbox" className="rounded" checked={!!options.maskBank} disabled={disabled}
+                  onChange={(e) => update({ maskBank: e.target.checked })} />
+                6222 **** **** 1234
+              </label>
+            </Field>
+          </div>
+        )}
+        {(options.mode || 'clean') === 'trad' && (
+          <Field label="转换方向">
+            <div className="flex flex-wrap gap-3 pt-1">
+              <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                <input type="radio" name={`tdir-${toolKey}`} value="s2t"
+                  checked={(options.tradDirection || 's2t') === 's2t'} disabled={disabled}
+                  onChange={() => update({ tradDirection: 's2t' })} />
+                简体 → 繁体
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                <input type="radio" name={`tdir-${toolKey}`} value="t2s"
+                  checked={(options.tradDirection || 's2t') === 't2s'} disabled={disabled}
+                  onChange={() => update({ tradDirection: 't2s' })} />
+                繁体 → 简体
+              </label>
+              <span className="text-xs text-slate-400 pt-1">※ 基于 2000+ 常用字库，生僻字保留原样</span>
+            </div>
+          </Field>
+        )}
+        {(options.mode || 'clean') === 'diff' && (
+          <div className="text-xs text-amber-700 bg-amber-50 rounded-lg p-3 border border-amber-200 leading-5">
+            ℹ️ 差异对比模式：请上传 <strong>恰好 2 个</strong> 文本文件（先上传 = 原始文件，后上传 = 新文件）。输出统一 Diff 格式，
+            <code className="mx-1 px-1 rounded bg-white">-</code>代表删除、
+            <code className="mx-1 px-1 rounded bg-white">+</code>代表新增、
+            <code className="mx-1 px-1 rounded bg-white">空格</code>代表相同。
+          </div>
+        )}
+      </div>
+    ),
+    'work-hours': (
+      <div className="space-y-4">
+        <Field label="计算模式">
+          <div className="flex flex-wrap gap-3">
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="radio" name={`whm-${toolKey}`} value="single"
+                checked={(options.mode || 'single') === 'single'} disabled={disabled}
+                onChange={() => update({ mode: 'single' })} />
+              📅 单日工时 + 薪资
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="radio" name={`whm-${toolKey}`} value="batch"
+                checked={(options.mode || 'single') === 'batch'} disabled={disabled}
+                onChange={() => update({ mode: 'batch' })} />
+              📊 批量多日（粘贴 CSV 数据）
+            </label>
+          </div>
+        </Field>
+        {(options.mode || 'single') === 'single' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Field label="上班时间">
+              <input type="time" className="input" value={options.workStart || '09:00'} disabled={disabled}
+                onChange={(e) => update({ workStart: e.target.value })} />
+            </Field>
+            <Field label="下班时间">
+              <input type="time" className="input" value={options.workEnd || '18:00'} disabled={disabled}
+                onChange={(e) => update({ workEnd: e.target.value })} />
+            </Field>
+            <Field label="午休开始">
+              <input type="time" className="input" value={options.lunchStart || '12:00'} disabled={disabled}
+                onChange={(e) => update({ lunchStart: e.target.value })} />
+            </Field>
+            <Field label="午休结束">
+              <input type="time" className="input" value={options.lunchEnd || '13:00'} disabled={disabled}
+                onChange={(e) => update({ lunchEnd: e.target.value })} />
+            </Field>
+          </div>
+        )}
+        {(options.mode || 'single') === 'batch' && (
+          <Field label="批量 CSV 打卡数据" hint="每行格式：日期,上班时间,下班时间,类型(可选 normal/weekend/holiday)" colSpan={2}>
+            <textarea className="input min-h-[140px] font-mono text-xs leading-5" disabled={disabled}
+              placeholder={'2024-05-01,09:00,18:00,normal\n2024-05-02,09:30,21:00,weekend\n2024-05-03,10:00,19:00,holiday'}
+              value={options.batchData || ''}
+              onChange={(e) => update({ batchData: e.target.value })} />
+          </Field>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="薪资模式">
+            <select className="input" disabled={disabled} value={options.salaryMode || 'hourly'}
+              onChange={(e) => update({ salaryMode: e.target.value })}>
+              <option value="hourly">输入时薪（¥/h）</option>
+              <option value="monthly">输入月薪 → 反推时薪</option>
+            </select>
+          </Field>
+          {(options.salaryMode || 'hourly') === 'hourly' ? (
+            <Field label="时薪（¥）">
+              <input type="number" className="input" min={0} step={0.5} value={options.hourlyRate ?? 30} disabled={disabled}
+                onChange={(e) => update({ hourlyRate: Number(e.target.value) || 0 })} />
+            </Field>
+          ) : (
+            <>
+              <Field label="月薪（¥）">
+                <input type="number" className="input" min={0} step={100} value={options.monthlyRate ?? 8000} disabled={disabled}
+                  onChange={(e) => update({ monthlyRate: Number(e.target.value) || 0 })} />
+              </Field>
+              <Field label="月工作天数">
+                <input type="number" className="input" min={1} max={31} value={options.workDaysPerMonth ?? 22} disabled={disabled}
+                  onChange={(e) => update({ workDaysPerMonth: Number(e.target.value) || 22 })} />
+              </Field>
+            </>
+          )}
+        </div>
+        <Field label="加班倍率（按劳动法常用默认）">
+          <div className="flex flex-wrap gap-4 pt-1">
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="rounded" checked={options.overtime15 !== false} disabled={disabled}
+                onChange={(e) => update({ overtime15: e.target.checked })} />
+              工作日 ×1.5
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="rounded" checked={!!options.overtime20} disabled={disabled}
+                onChange={(e) => update({ overtime20: e.target.checked })} />
+              周末 ×2
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="rounded" checked={!!options.overtime30} disabled={disabled}
+                onChange={(e) => update({ overtime30: e.target.checked })} />
+              法定假日 ×3
+            </label>
+          </div>
+        </Field>
+      </div>
+    ),
+    'timestamp': (
+      <div className="space-y-4">
+        <Field label="转换模式">
+          <div className="flex flex-wrap gap-3">
+            {[
+              { k: 'ts2date', label: '⏳ 时间戳 → 日期（秒/毫秒自动识别）' },
+              { k: 'date2ts', label: '📆 日期 → 时间戳' },
+              { k: 'batch', label: '📋 批量混合（每行一个时间戳或日期）' },
+            ].map((r) => (
+              <label key={r.k} className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                <input type="radio" name={`tsm-${toolKey}`} value={r.k}
+                  checked={(options.mode || 'ts2date') === r.k} disabled={disabled}
+                  onChange={() => update({ mode: r.k })} />
+                {r.label}
+              </label>
+            ))}
+          </div>
+        </Field>
+        {(options.mode || 'ts2date') === 'ts2date' && (
+          <Field label="时间戳（10位秒 / 13位毫秒，自动识别）">
+            <input type="text" className="input font-mono" value={options.timestamp ?? ''} disabled={disabled}
+              onChange={(e) => update({ timestamp: e.target.value })} />
+          </Field>
+        )}
+        {(options.mode || 'ts2date') === 'date2ts' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="日期时间（YYYY-MM-DD HH:mm:ss）">
+              <input type="datetime-local" className="input"
+                value={(options.dateTime || '').replace(' ', 'T')} disabled={disabled}
+                onChange={(e) => update({ dateTime: e.target.value.replace('T', ' ') })} />
+            </Field>
+          </div>
+        )}
+        {(options.mode || 'ts2date') === 'batch' && (
+          <Field label="批量输入（每行一个：纯数字按时间戳解析，否则按日期解析）" colSpan={2}>
+            <textarea className="input min-h-[140px] font-mono text-xs leading-5" disabled={disabled}
+              placeholder={'1717209600\n1717209600000\n2024-06-01 12:00:00\n2023-12-31 23:59:59'}
+              value={options.batchInput || ''}
+              onChange={(e) => update({ batchInput: e.target.value })} />
+          </Field>
+        )}
+      </div>
+    ),
+    'password-generator': (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label={`密码长度 ${options.length ?? 16} 位`}>
+            <input type="range" min={4} max={128} step={1}
+              value={options.length ?? 16} disabled={disabled}
+              onChange={(e) => update({ length: Number(e.target.value) })} />
+          </Field>
+          <Field label={`生成数量 ${options.count ?? 5} 条`} hint="最大 1000 条">
+            <input type="number" className="input" min={1} max={1000}
+              value={options.count ?? 5} disabled={disabled}
+              onChange={(e) => update({ count: Math.min(1000, Math.max(1, Number(e.target.value) || 1)) })} />
+          </Field>
+        </div>
+        <Field label="包含的字符类型（至少一项）">
+          <div className="flex flex-wrap gap-4 pt-1">
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="rounded" checked={options.includeUpper !== false} disabled={disabled}
+                onChange={(e) => update({ includeUpper: e.target.checked })} />
+              A-Z 大写字母
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="rounded" checked={options.includeLower !== false} disabled={disabled}
+                onChange={(e) => update({ includeLower: e.target.checked })} />
+              a-z 小写字母
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="rounded" checked={options.includeNumber !== false} disabled={disabled}
+                onChange={(e) => update({ includeNumber: e.target.checked })} />
+              0-9 数字
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="rounded" checked={!!options.includeSymbol} disabled={disabled}
+                onChange={(e) => update({ includeSymbol: e.target.checked })} />
+              特殊符号
+            </label>
+          </div>
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="排除易混字符（I/l/1/|/O/0/o）" hint="推荐开启，避免手写/抄录错误">
+            <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+              <input type="checkbox" className="rounded" checked={options.excludeAmbiguous !== false} disabled={disabled}
+                onChange={(e) => update({ excludeAmbiguous: e.target.checked })} />
+              开启（推荐）
+            </label>
+          </Field>
+          <Field label="每类字符至少各一个" hint="保证强密码混合度，长度不足会自动补齐">
+            <label className="inline-flex items-center gap-2 text-sm pt-1.5 cursor-pointer">
+              <input type="checkbox" className="rounded" checked={options.requireEachType !== false} disabled={disabled}
+                onChange={(e) => update({ requireEachType: e.target.checked })} />
+              开启（推荐）
+            </label>
+          </Field>
+        </div>
+        {!!options.includeSymbol && (
+          <Field label="自定义符号集" hint="修改后会覆盖默认符号；不建议使用引号/斜杠/反引号等">
+            <input type="text" className="input font-mono text-sm"
+              value={options.customSymbols || '!@#$%^&*()-_=+[]{};:,.<>?'} disabled={disabled}
+              onChange={(e) => update({ customSymbols: e.target.value })} />
+          </Field>
+        )}
+        <div className="text-xs text-emerald-700 bg-emerald-50 rounded-lg p-3 border border-emerald-200 leading-5">
+          🔒 <strong>安全说明</strong>：使用 <code className="mx-1 px-1 rounded bg-white">window.crypto.getRandomValues</code> 加密级随机数（非 <code className="mx-1 px-1 rounded bg-white">Math.random()</code>），
+          密码仅在您的浏览器生成，<strong>绝不联网、不传输、不存储</strong>。
+        </div>
+      </div>
+    ),
+    'unit-convert': (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <Field label="换算类别">
+            <select className="input" disabled={disabled} value={options.category || 'length'}
+              onChange={(e) => update({ category: e.target.value })}>
+              <option value="length">📏 长度</option>
+              <option value="weight">⚖️ 重量/质量</option>
+              <option value="volume">🧪 体积/容量</option>
+              <option value="temp">🌡️ 温度</option>
+              <option value="area">🟦 面积</option>
+              <option value="time">⏱️ 时间</option>
+              <option value="storage">💾 数据存储</option>
+              <option value="energy">🔥 能量/热量</option>
+            </select>
+          </Field>
+          <Field label="从（源单位）">
+            <select className="input" disabled={disabled} value={options.fromUnit || 'm'}
+              onChange={(e) => update({ fromUnit: e.target.value })}>
+              {(function () {
+                const cat = options.category || 'length';
+                const MAP: Record<string, [string, string][]> = {
+                  length: [['m', '米 (m)'], ['km', '千米 (km)'], ['cm', '厘米 (cm)'], ['mm', '毫米 (mm)'], ['inch', '英寸 (in)'], ['ft', '英尺 (ft)'], ['yd', '码 (yd)'], ['mi', '英里 (mi)'], ['li', '里（市制）'], ['zhang', '丈'], ['chi', '尺']],
+                  weight: [['kg', '千克 (kg)'], ['g', '克 (g)'], ['mg', '毫克 (mg)'], ['t', '吨 (t)'], ['lb', '磅 (lb)'], ['oz', '盎司 (oz)'], ['jin', '斤（市斤）'], ['liang', '两'], ['ct', '克拉 (ct)']],
+                  volume: [['L', '升 (L)'], ['mL', '毫升 (mL)'], ['m3', '立方米 (m³)'], ['gal_us', '美制加仑'], ['gal_uk', '英制加仑'], ['pt_us', '美制品脱'], ['cup', '杯 (240mL)'], ['tbsp', '汤匙 (15mL)']],
+                  temp: [['C', '摄氏度 (℃)'], ['F', '华氏度 (℉)'], ['K', '开尔文 (K)']],
+                  area: [['m2', '平方米 (㎡)'], ['km2', '平方千米 (km²)'], ['ha', '公顷 (ha)'], ['mu', '亩（市亩）'], ['ft2', '平方英尺'], ['in2', '平方英寸'], ['acre', '英亩 (acre)']],
+                  time: [['s', '秒 (s)'], ['ms', '毫秒 (ms)'], ['min', '分钟'], ['h', '小时 (h)'], ['d', '天 (day)'], ['wk', '周'], ['mo', '月（30天）'], ['yr', '年（365天）']],
+                  storage: [['B', '字节 (B)'], ['KB', '千字节 (KB)'], ['MB', '兆字节 (MB)'], ['GB', '吉字节 (GB)'], ['TB', '太字节 (TB)'], ['PB', '拍字节 (PB)'], ['Kb', '千比特 (Kbit)'], ['Mb', '兆比特 (Mbit)']],
+                  energy: [['J', '焦耳 (J)'], ['kJ', '千焦 (kJ)'], ['cal', '卡路里 (cal)'], ['kcal', '大卡/千卡 (kcal)'], ['Wh', '瓦时 (Wh)'], ['kWh', '度 (kWh)'], ['BTU', '英热单位 (BTU)']],
+                };
+                return (MAP[cat] || []).map(([v, l]) => <option key={v} value={v}>{l}</option>);
+              })()}
+            </select>
+          </Field>
+          <Field label="到（目标单位）">
+            <select className="input" disabled={disabled} value={options.toUnit || 'inch'}
+              onChange={(e) => update({ toUnit: e.target.value })}>
+              {(function () {
+                const cat = options.category || 'length';
+                const MAP: Record<string, [string, string][]> = {
+                  length: [['m', '米 (m)'], ['km', '千米 (km)'], ['cm', '厘米 (cm)'], ['mm', '毫米 (mm)'], ['inch', '英寸 (in)'], ['ft', '英尺 (ft)'], ['yd', '码 (yd)'], ['mi', '英里 (mi)'], ['li', '里（市制）'], ['zhang', '丈'], ['chi', '尺']],
+                  weight: [['kg', '千克 (kg)'], ['g', '克 (g)'], ['mg', '毫克 (mg)'], ['t', '吨 (t)'], ['lb', '磅 (lb)'], ['oz', '盎司 (oz)'], ['jin', '斤（市斤）'], ['liang', '两'], ['ct', '克拉 (ct)']],
+                  volume: [['L', '升 (L)'], ['mL', '毫升 (mL)'], ['m3', '立方米 (m³)'], ['gal_us', '美制加仑'], ['gal_uk', '英制加仑'], ['pt_us', '美制品脱'], ['cup', '杯 (240mL)'], ['tbsp', '汤匙 (15mL)']],
+                  temp: [['C', '摄氏度 (℃)'], ['F', '华氏度 (℉)'], ['K', '开尔文 (K)']],
+                  area: [['m2', '平方米 (㎡)'], ['km2', '平方千米 (km²)'], ['ha', '公顷 (ha)'], ['mu', '亩（市亩）'], ['ft2', '平方英尺'], ['in2', '平方英寸'], ['acre', '英亩 (acre)']],
+                  time: [['s', '秒 (s)'], ['ms', '毫秒 (ms)'], ['min', '分钟'], ['h', '小时 (h)'], ['d', '天 (day)'], ['wk', '周'], ['mo', '月（30天）'], ['yr', '年（365天）']],
+                  storage: [['B', '字节 (B)'], ['KB', '千字节 (KB)'], ['MB', '兆字节 (MB)'], ['GB', '吉字节 (GB)'], ['TB', '太字节 (TB)'], ['PB', '拍字节 (PB)'], ['Kb', '千比特 (Kbit)'], ['Mb', '兆比特 (Mbit)']],
+                  energy: [['J', '焦耳 (J)'], ['kJ', '千焦 (kJ)'], ['cal', '卡路里 (cal)'], ['kcal', '大卡/千卡 (kcal)'], ['Wh', '瓦时 (Wh)'], ['kWh', '度 (kWh)'], ['BTU', '英热单位 (BTU)']],
+                };
+                return (MAP[cat] || []).map(([v, l]) => <option key={v} value={v}>{l}</option>);
+              })()}
+            </select>
+          </Field>
+          <Field label="要换算的数值">
+            <input type="number" className="input" step="any" value={options.value ?? 1} disabled={disabled}
+              onChange={(e) => update({ value: e.target.value })} />
+          </Field>
+          <Field label={`小数位数 ${options.precision ?? 4}`} hint="0~12 位">
+            <input type="range" min={0} max={12} step={1} value={options.precision ?? 4} disabled={disabled}
+              onChange={(e) => update({ precision: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <Field label="启用批量模式">
+          <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" className="rounded" checked={!!options.batchMode} disabled={disabled}
+              onChange={(e) => update({ batchMode: e.target.checked })} />
+            批量模式（粘贴多行数值一次完成换算，单次模式的数值将被忽略）
+          </label>
+        </Field>
+        {!!options.batchMode && (
+          <Field label="批量数值（每行一个纯数字）" colSpan={2}>
+            <textarea className="input min-h-[140px] font-mono text-xs leading-5" disabled={disabled}
+              placeholder={'1\n2.5\n3.785\n1000\n1048576'}
+              value={options.batchInput || ''}
+              onChange={(e) => update({ batchInput: e.target.value })} />
+          </Field>
+        )}
+      </div>
+    ),
   };
 
   if (!panels[toolKey]) return null;

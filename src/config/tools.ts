@@ -510,6 +510,127 @@ export const TOOLS_CONFIG: Record<string, ToolConfig> = {
     processor: P.idPhoto,
     showPreview: true,
   },
+
+  // =======================================================
+  // 批次 2 · 二维码工具全集（留存主力）
+  // =======================================================
+  'qr-generate': {
+    key: 'qr-generate',
+    path: '/tools/qr-generate',
+    name: '美化二维码生成器',
+    shortDesc: '免费在线一键生成高辨识度美化二维码，6 套主题模板，支持 Logo 叠加、PNG/SVG 矢量输出',
+    category: 'qr',
+    icon: '🎨',
+    title: '美化二维码生成器 免费在线 Logo嵌入 - MendFile 全能办公工具',
+    description: 'MendFile 免费在线美化二维码生成器，支持商务蓝、樱花粉、渐变金等 6 套一键主题模板，自定义前背景色、圆角点样式、Logo 图片叠加，PNG/SVG 双格式高清输出，纯前端本地生成，内容不上传服务器。',
+    keywords: ['美化二维码生成器', '免费在线二维码生成', 'Logo嵌入二维码', '商务二维码', 'SVG矢量二维码', '樱花粉二维码', '二维码自定义颜色'],
+    features: [
+      '6 套一键主题模板：商务蓝 / 极简黑 / 樱花粉 / 渐变金 / 科技青 / 复古棕，切换即应用配色与圆角样式',
+      '4 级容错（L/M/Q/H，H 支持 30% 面积 Logo 覆盖），尺寸 128~2000px 自由调节',
+      '前背景色自由组合，点样式支持方形 / 圆角 / 圆点 3 种视觉效果',
+      '支持 Logo 图片叠加（居中自动缩放至容错安全区 20%），输出 PNG 位图 或 SVG 矢量',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地生成，所有内容与图案均在您浏览器内计算完成，绝不上传服务器，不保存任何二维码图案',
+      '⚠️ 链接类二维码生成后请务必使用手机扫码验证；超长文本请选择 Q/H 级容错以保证识别率',
+      '⚠️ Logo 叠加占用部分数据模块面积，若叠加后识别失败请尝试去除 Logo 或提高容错等级',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'image/*',
+    multiple: false,
+    fileRequired: false,
+    outputExt: 'png',
+    outputFileName: 'MendFile_美化二维码',
+    defaultOptions: {
+      content: 'https://mendfile.com',
+      ecLevel: 'M', // L/M/Q/H
+      size: 512,
+      template: 'default', // default/business/sakura/gold/tech/vintage
+      fgColor: '#111827',
+      bgColor: '#ffffff',
+      dotStyle: 'square', // square/rounded/dot
+      // logoFile 作为 options.logoDataURL 直接写入（上传后转 base64）
+      logoDataURL: '',
+      outputFormat: 'png', // png / svg
+    },
+    processor: P.qrGenerate,
+    showPreview: true,
+  },
+
+  'qr-batch': {
+    key: 'qr-batch',
+    path: '/tools/qr-batch',
+    name: '批量二维码生成器',
+    shortDesc: '批量粘贴文本一键生成大量二维码图片，自动命名 ZIP 打包下载，附数据清单 CSV',
+    category: 'qr',
+    icon: '🧾',
+    title: '批量二维码生成器 批量生成打包下载 - MendFile 全能办公工具',
+    description: 'MendFile 批量二维码生成器，支持粘贴多行内容（每行一条，最多 10000 条），统一定制尺寸、容错、前背景色、圆角点样式，自动按序命名并 ZIP 打包下载，附带 CSV 清单便于核对，纯前端本地处理零上传。',
+    keywords: ['批量二维码生成', '批量生成二维码打包下载', 'Excel批量二维码', '批量二维码生成器免费', 'URL批量二维码', '批量二维码命名'],
+    features: [
+      '粘贴多行内容（每行一条，最多 10000 条），一键生成全部二维码',
+      '统一样式：尺寸 128~2000px、4 级容错、前背景色、方形/圆角/圆点 3 种点样式',
+      '自动命名（前缀 + 序号）并 ZIP 打包，附带 manifest.csv 清单（序号/文件名/原始内容）',
+      '支持 PNG / JPG 两种格式，JPG 可调节质量参数，适合批量打印与分发',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地生成，所有内容与二维码不会离开您的浏览器；批量生成会占用本机内存，请合理分批',
+      '⚠️ 大数据量（≥1000 条）或大尺寸（≥1500px）生成耗时较长，请耐心等待进度条并及时下载结果',
+      '⚠️ 内容中含有特殊字符或 emoji 时，请在下载后抽查前/中/后各若干张验证扫码正确性',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: '',
+    multiple: false,
+    fileRequired: false,
+    outputExt: 'zip',
+    outputFileName: 'MendFile_批量二维码',
+    defaultOptions: {
+      lines: 'https://mendfile.com\nhttps://example.com\n联系电话：400-000-0000',
+      ecLevel: 'M',
+      size: 512,
+      fgColor: '#111827',
+      bgColor: '#ffffff',
+      dotStyle: 'square',
+      fileNamePrefix: 'qrcode',
+      format: 'png', // png / jpg
+      quality: 92,
+    },
+    processor: P.qrBatch,
+    showPreview: true,
+  },
+
+  'qr-parse': {
+    key: 'qr-parse',
+    path: '/tools/qr-parse',
+    name: '二维码图片批量解析',
+    shortDesc: '批量上传二维码图片本地识别内容，结果一键复制或导出 TXT/CSV，支持多图识别',
+    category: 'qr',
+    icon: '🔍',
+    title: '二维码批量解析识别 上传图片识别内容 - MendFile 全能办公工具',
+    description: 'MendFile 二维码批量解析器，支持上传多张 QR Code 图片本地识别内容，无需联网不泄露数据，识别结果可逐条查看、一键复制全部或导出 TXT/CSV 清单，纯前端零上传零记录。',
+    keywords: ['二维码批量解析', '二维码识别在线', '图片扫二维码内容提取', '微信二维码解析', '批量识别二维码图片', '二维码解码工具'],
+    features: [
+      '批量上传 50 张以内 QR Code 图片（JPG/PNG/WebP/BMP/GIF 全兼容），逐张识别列出结果',
+      '纯前端浏览器本地解析，所有图片与识别内容不上传服务器、不写入任何存储',
+      '识别结果列表：文件名 / 识别内容 / 状态，支持一键复制全部结果、或导出 TXT/CSV 两种格式',
+      '同一张图片含多个二维码时将全部识别并展开，无法识别的图片会明确标记原因',
+    ],
+    boundaries: [
+      '⚠️ 纯前端本地解析，所有图片与识别内容绝不会离开您的浏览器或被任何第三方获取',
+      '⚠️ 目前仅支持标准 QR Code，暂不支持 Aztec / DataMatrix / Code128 / EAN13 等其他条码类型',
+      '⚠️ 过低分辨率、严重模糊、强烈反光或严重倾斜的图片可能识别失败，建议图像≥200×200 像素',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: 'image/*',
+    multiple: true,
+    outputExt: 'txt',
+    outputFileName: 'MendFile_二维码识别结果',
+    defaultOptions: {
+      exportFormat: 'txt', // txt / csv（processor 里用）
+    },
+    processor: P.qrParse,
+    showPreview: true,
+  },
 };
 
 export const TOOL_ROUTES = Object.values(TOOLS_CONFIG).map((t) => ({ key: t.key, path: t.path }));

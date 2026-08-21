@@ -26,6 +26,10 @@ import {
   generatePdfThumbnail,
 } from './utils';
 import { pdfjsLib } from './pdfjs';
+// 批次 2 · 二维码库（纯前端，零上传）
+// @ts-ignore - qrcode-generator 官方未独立发布 .d.ts，按运行时 API 使用
+import qrcode from 'qrcode-generator';
+import jsQR from 'jsqr';
 
 /**
  * 把 pdf-lib 返回的 Uint8Array 转成 Blob 兼容类型。
@@ -1565,5 +1569,382 @@ export const idPhoto: ProcessFn = async ({ files, options }, onProgress) => {
   return {
     blob: buf, ext: 'zip', fileName: 'MendFile_证件照单张+拼版',
     preview: { stats, thumbnails: [out.toDataURL('image/jpeg', 0.5), layout.toDataURL('image/jpeg', 0.3)] },
+  };
+};
+
+// ==========================================================================
+// 批次 2 · 二维码工具（qr-generate / qr-batch / qr-parse）
+// ==========================================================================
+
+type EcLevel = 'L' | 'M' | 'Q' | 'H';
+type DotStyle = 'square' | 'rounded' | 'dot';
+
+function toEcConst(level: EcLevel): number {
+  // qrcode-generator 运行时常量映射：ECC_L=1 / ECC_M=0 / ECC_Q=3 / ECC_H=2
+  const map: Record<EcLevel, number> = { L: 1, M: 0, Q: 3, H: 2 };
+  return map[level];
+}
+
+function buildQR(content: string, ecLevel: EcLevel): any {
+  if (!content) throw new Error('二维码内容不能为空');
+  const inst = qrcode(0, toEcConst(ecLevel) as any); // typeNumber = 0 自动选择版本
+  inst.addData(content, 'Byte');
+  try {
+    inst.make();
+  } catch (e: any) {
+    throw new Error('内容过长，请缩短内容或提高容错等级后重试');
+  }
+  return inst;
+}
+
+/** 判断 module(r, c) 是否落在 Finder Pattern 区域（3 个定位角 7x7，保留为方框） */
+function isFinderArea(r: number, c: number, modCount: number): boolean {
+  if (r < 7 && c < 7) return true;
+  if (r < 7 && c >= modCount - 7) return true;
+  if (r >= modCount - 7 && c < 7) return true;
+  return false;
+}
+
+/** 在 Canvas 上按指定 dotStyle 绘制二维码点阵（Finder 保持方形边框保证识别） */
+function drawQRModulesToCanvas(qr: any, canvas: HTMLCanvasElement, fg: string, bg: string, style: DotStyle) {
+  const count = qr.getModuleCount() as number;
+  const W = canvas.width, H = canvas.height;
+  const marginPx = Math.max(2, Math.round(Math.min(W, H) * 0.04));
+  const mod = (Math.min(W, H) - marginPx * 2) / count;
+  const ctx = canvas.getContext('2d')!;
+  // 背景
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = fg;
+  const cell = mod;
+  const radius = style === 'rounded' ? cell * 0.25 : 0;
+  for (let r = 0; r < count; r++) {
+    for (let c = 0; c < count; c++) {
+      if (!qr.isDark(r, c)) continue;
+      const x = marginPx + c * cell;
+      const y = marginPx + r * cell;
+      const finder = isFinderArea(r, c, count);
+      if (finder || style === 'square') {
+        ctx.fillRect(x, y, cell, cell);
+      } else if (style === 'rounded') {
+        const rr = Math.min(radius, cell / 2 - 0.5);
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.lineTo(x + cell - rr, y);
+        ctx.quadraticCurveTo(x + cell, y, x + cell, y + rr);
+        ctx.lineTo(x + cell, y + cell - rr);
+        ctx.quadraticCurveTo(x + cell, y + cell, x + cell - rr, y + cell);
+        ctx.lineTo(x + rr, y + cell);
+        ctx.quadraticCurveTo(x, y + cell, x, y + cell - rr);
+        ctx.lineTo(x, y + rr);
+        ctx.quadraticCurveTo(x, y, x + rr, y);
+        ctx.closePath();
+        ctx.fill();
+      } else if (style === 'dot') {
+        ctx.beginPath();
+        ctx.arc(x + cell / 2, y + cell / 2, cell * 0.42, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  // 重绘 Finder 外边框（避免 rounded/dot 模式下定位角样式破坏识别）
+  ctx.lineWidth = Math.max(1, Math.round(cell * 0.25));
+  ctx.strokeStyle = fg;
+  const drawFinderBox = (ax: number, ay: number) => {
+    // 外框 7x7 modules
+    ctx.strokeRect(ax + 0.5 * cell, ay + 0.5 * cell, 6 * cell, 6 * cell);
+    // 内部小方块 3x3 modules (偏移 2)
+    ctx.fillRect(ax + 2 * cell, ay + 2 * cell, 3 * cell, 3 * cell);
+  };
+  drawFinderBox(marginPx, marginPx);
+  drawFinderBox(marginPx + (count - 7) * cell, marginPx);
+  drawFinderBox(marginPx, marginPx + (count - 7) * cell);
+}
+
+async function qrToCanvasBlob(qr: any, size: number, fg: string, bg: string, style: DotStyle, format: 'png' | 'jpg', quality: number, logoDataURL?: string): Promise<Blob> {
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  drawQRModulesToCanvas(qr, canvas, fg, bg, style);
+  // Logo 叠加（居中 20% 面积）
+  if (logoDataURL) {
+    try {
+      const img = await loadImage(logoDataURL);
+      const ctx = canvas.getContext('2d')!;
+      const box = Math.round(Math.min(canvas.width, canvas.height) * 0.22); // 22% 面积
+      const pad = Math.round(box * 0.1); // 白边 10%
+      const cx = (canvas.width - box) / 2;
+      const cy = (canvas.height - box) / 2;
+      ctx.save();
+      // 白底圆角
+      ctx.fillStyle = '#ffffff';
+      const rad = Math.round(box * 0.1);
+      ctx.beginPath();
+      ctx.moveTo(cx - pad + rad, cy - pad);
+      ctx.lineTo(cx + box + pad - rad, cy - pad);
+      ctx.quadraticCurveTo(cx + box + pad, cy - pad, cx + box + pad, cy - pad + rad);
+      ctx.lineTo(cx + box + pad, cy + box + pad - rad);
+      ctx.quadraticCurveTo(cx + box + pad, cy + box + pad, cx + box + pad - rad, cy + box + pad);
+      ctx.lineTo(cx - pad + rad, cy + box + pad);
+      ctx.quadraticCurveTo(cx - pad, cy + box + pad, cx - pad, cy + box + pad - rad);
+      ctx.lineTo(cx - pad, cy - pad + rad);
+      ctx.quadraticCurveTo(cx - pad, cy - pad, cx - pad + rad, cy - pad);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      // 保持比例画 Logo
+      const ratio = img.width / img.height;
+      let dw = box, dh = box;
+      if (ratio >= 1) dh = Math.round(box / ratio); else dw = Math.round(box * ratio);
+      ctx.drawImage(img, cx + (box - dw) / 2, cy + (box - dh) / 2, dw, dh);
+    } catch (_e) { /* ignore logo draw failure */ }
+  }
+  const type = format === 'jpg' ? 'image/jpeg' : 'image/png';
+  return canvasToBlob(canvas, type, quality / 100);
+}
+
+function qrToSVGString(qr: any, fg: string, bg: string, style: DotStyle, size: number): string {
+  const count = qr.getModuleCount() as number;
+  const margin = Math.max(2, Math.round(size * 0.04));
+  const cell = (size - margin * 2) / count;
+  // 简化：SVG 统一方形 module（rounded/dot 变体在 SVG 中也用方形避免生成路径过大）
+  const modules: string[] = [];
+  for (let r = 0; r < count; r++) {
+    for (let c = 0; c < count; c++) {
+      if (qr.isDark(r, c)) {
+        const x = (margin + c * cell).toFixed(2);
+        const y = (margin + r * cell).toFixed(2);
+        const s = cell.toFixed(2);
+        if (style === 'dot') {
+          modules.push(`<circle cx="${(Number(x) + cell / 2).toFixed(2)}" cy="${(Number(y) + cell / 2).toFixed(2)}" r="${(cell * 0.44).toFixed(2)}" fill="${fg}"/>`);
+        } else if (style === 'rounded') {
+          const rr = Math.min(cell * 0.25, cell / 2 - 0.5).toFixed(2);
+          modules.push(`<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="${rr}" ry="${rr}" fill="${fg}"/>`);
+        } else {
+          modules.push(`<rect x="${x}" y="${y}" width="${s}" height="${s}" fill="${fg}"/>`);
+        }
+      }
+    }
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges"><rect width="${size}" height="${size}" fill="${bg}"/>\n${modules.join('\n')}\n</svg>\n`;
+}
+
+function previewFromCanvasBlob(blob: Blob): Promise<string> {
+  return new Promise((resolve) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result || ''));
+    fr.onerror = () => resolve('');
+    fr.readAsDataURL(blob);
+  });
+}
+
+// -------------- qr-generate：美化二维码单条生成 --------------
+export const qrGenerate: ProcessFn = async ({ options }, onProgress): Promise<ProcessOutput> => {
+  const content = String(options?.content ?? '').trim();
+  const ecLevel = (options?.ecLevel || 'M') as EcLevel;
+  const rawSize = Number(options?.size || 512);
+  const size = Math.max(128, Math.min(2000, Math.round(rawSize)));
+  const fg = String(options?.fgColor || '#111111');
+  const bg = String(options?.bgColor || '#ffffff');
+  const dotStyle = (options?.dotStyle || 'square') as DotStyle;
+  const logoDataURL = String(options?.logoDataURL || '');
+  const outputFormat = String(options?.outputFormat || 'png');
+  onProgress(0.05, '初始化二维码矩阵');
+  const qr = buildQR(content, ecLevel);
+  onProgress(0.5, '渲染图形');
+  if (outputFormat === 'svg') {
+    const svgStr = qrToSVGString(qr, fg, bg, dotStyle, size);
+    const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+    onProgress(0.9, '生成结果');
+    // SVG 预览
+    const thumb = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`;
+    onProgress(1);
+    return {
+      blob, ext: 'svg', fileName: 'MendFile_美化二维码矢量',
+      preview: { stats: [{ label: '内容长度', value: content.length.toString() + ' 字符' }, { label: '尺寸', value: size + '×' + size + ' SVG' }, { label: '容错等级', value: ecLevel }], thumbnails: [thumb] },
+    };
+  }
+  const blob = await qrToCanvasBlob(qr, size, fg, bg, dotStyle, 'png', 100, logoDataURL);
+  const thumb = await previewFromCanvasBlob(blob);
+  onProgress(1);
+  return {
+    blob, ext: 'png', fileName: 'MendFile_美化二维码',
+    preview: { stats: [{ label: '内容长度', value: content.length.toString() + ' 字符' }, { label: '尺寸', value: size + '×' + size + ' px' }, { label: '容错等级', value: ecLevel }], thumbnails: [thumb] },
+  };
+};
+
+// -------------- qr-batch：批量二维码生成 + ZIP 打包 --------------
+export const qrBatch: ProcessFn = async ({ options }, onProgress): Promise<ProcessOutput> => {
+  const raw = String(options?.lines ?? '');
+  const rows = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!rows.length) throw new Error('请输入至少一行内容');
+  if (rows.length > 10000) throw new Error('单次批量生成最多 10000 条，请分批操作');
+  const ecLevel = (options?.ecLevel || 'M') as EcLevel;
+  const rawSize = Number(options?.size || 512);
+  const size = Math.max(128, Math.min(2000, Math.round(rawSize)));
+  const fg = String(options?.fgColor || '#111111');
+  const bg = String(options?.bgColor || '#ffffff');
+  const dotStyle = (options?.dotStyle || 'square') as DotStyle;
+  const prefix = String(options?.fileNamePrefix || 'qrcode').trim() || 'qrcode';
+  const format = (String(options?.format || 'png').toLowerCase() === 'jpg') ? 'jpg' : 'png';
+  const quality = Math.max(1, Math.min(100, Number(options?.quality || 92)));
+
+  const padWidth = Math.max(3, String(rows.length).length);
+  const fmtIdx = (i: number) => String(i).padStart(padWidth, '0');
+
+  const zip = new JSZip();
+  const manifest: string[] = ['index,filename,content'];
+  const total = rows.length;
+  const thumbs: string[] = [];
+  for (let i = 0; i < total; i++) {
+    onProgress((i + 0.5) / total, `生成 ${i + 1}/${total}`);
+    const content = rows[i];
+    try {
+      const qr = buildQR(content, ecLevel);
+      const blob = await qrToCanvasBlob(qr, size, fg, bg, dotStyle, format as any, quality, '');
+      const fname = `${safeName(prefix)}_${fmtIdx(i + 1)}.${format}`;
+      zip.file(fname, blob);
+      manifest.push(`${i + 1},${fname},${content.replace(/"/g, '""')}`);
+      if (thumbs.length < 4 && i < 4) thumbs.push(await previewFromCanvasBlob(blob));
+    } catch (e: any) {
+      throw new Error(`第 ${i + 1} 行生成失败：${e?.message || '内容过长'}`);
+    }
+  }
+  zip.file('manifest.csv', manifest.join('\n'));
+  onProgress(0.95, 'ZIP 打包中…');
+  const buf = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  onProgress(1);
+  return {
+    blob: buf, ext: 'zip', fileName: 'MendFile_批量二维码_' + total + '条',
+    preview: { stats: [{ label: '条目数量', value: total.toString() + ' 条' }, { label: '尺寸', value: size + '×' + size + ' px' }, { label: '格式', value: format.toUpperCase() + (format === 'jpg' ? ` (质量 ${quality}%)` : '') }, { label: '容错', value: ecLevel }], thumbnails: thumbs },
+  };
+};
+
+// -------------- qr-parse：批量上传图片解析二维码 --------------
+interface ParseResult { file: string; index: number; status: 'ok' | 'skip' | 'error'; content: string; message?: string; }
+
+export const qrParse: ProcessFn = async ({ files, options }, onProgress): Promise<ProcessOutput> => {
+  if (!files?.length) throw new Error('请先上传至少一张包含二维码的图片');
+  if (files.length > 50) throw new Error('单次最多上传 50 张图片，请分批操作');
+  const exportFmt = (String(options?.exportFormat || 'txt').toLowerCase() === 'csv') ? 'csv' : 'txt';
+  const results: ParseResult[] = [];
+  const total = files.length;
+  const toDataUri = async (file: File): Promise<{ data: Uint8ClampedArray; w: number; h: number }> => {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await loadImage(url);
+      const max = Math.max(img.width, img.height);
+      let scale = 1;
+      if (max > 1600) scale = 1600 / max; // 避免大图内存过大
+      let w = Math.max(1, Math.round(img.width * scale));
+      let h = Math.max(1, Math.round(img.height * scale));
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const c2d = c.getContext('2d', { willReadFrequently: true })!;
+      c2d.drawImage(img, 0, 0, w, h);
+      // 双尺度：原图 + 放大 2x（提升小码识别率）
+      const scales: number[] = [1];
+      if (max < 600) scales.push(2);
+      for (const s of scales) {
+        const W = Math.max(1, Math.round(w * s));
+        const H = Math.max(1, Math.round(h * s));
+        const cc = document.createElement('canvas'); cc.width = W; cc.height = H;
+        const cc2d = cc.getContext('2d', { willReadFrequently: true })!;
+        cc2d.drawImage(img, 0, 0, W, H);
+        const imgData = cc2d.getImageData(0, 0, W, H);
+        const res = jsQR(imgData.data, W, H, { inversionAttempts: 'attemptBoth' });
+        if (res && res.data) return { data: new Uint8ClampedArray(0), w: W, h: H, ...res as any } as any;
+        // 兼容类型：直接返回第一个尺度结果，失败返回空 Uint8 作为占位
+        void imgData;
+      }
+      return { data: new Uint8ClampedArray(0), w, h };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  };
+  const decodeWithjsQR = (buf: Uint8ClampedArray, w: number, h: number) => {
+    if (!buf.length) return null;
+    return jsQR(buf, w, h, { inversionAttempts: 'attemptBoth' });
+  };
+  for (let i = 0; i < total; i++) {
+    onProgress((i + 0.3) / total, `解析 ${i + 1}/${total}`);
+    const file = files[i];
+    try {
+      const loaded = await toDataUri(file);
+      // toDataUri 若命中直接 res.data，把 data 填充为识别结果
+      // 否则重新构造（兼容 jsQR 返回值提取）
+      let dec: any = null;
+      if ((loaded as any).data && typeof (loaded as any).data === 'string') {
+        dec = { data: (loaded as any).data };
+      } else {
+        // Fallback：再次用尺度 1 尝试（首次尝试已在 toDataUri 内做）
+        const url = URL.createObjectURL(file);
+        try {
+          const img = await loadImage(url);
+          const max = Math.max(img.width, img.height);
+          let scale = 1; if (max > 1600) scale = 1600 / max;
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          const c2d = c.getContext('2d', { willReadFrequently: true })!;
+          c2d.drawImage(img, 0, 0, w, h);
+          const id = c2d.getImageData(0, 0, w, h);
+          dec = jsQR(id.data, w, h, { inversionAttempts: 'attemptBoth' });
+          if (!dec && max < 1200) {
+            const w2 = w * 2, h2 = h * 2;
+            const c2 = document.createElement('canvas'); c2.width = w2; c2.height = h2;
+            const c2d2 = c2.getContext('2d', { willReadFrequently: true })!;
+            c2d2.drawImage(img, 0, 0, w2, h2);
+            const id2 = c2d2.getImageData(0, 0, w2, h2);
+            dec = jsQR(id2.data, w2, h2, { inversionAttempts: 'attemptBoth' });
+          }
+        } finally { URL.revokeObjectURL(url); }
+      }
+      if (dec && dec.data) {
+        results.push({ file: file.name, index: i + 1, status: 'ok', content: String(dec.data) });
+      } else {
+        results.push({ file: file.name, index: i + 1, status: 'skip', content: '', message: '未识别到 QR Code（可能分辨率过低/模糊/非标准QR）' });
+      }
+    } catch (e: any) {
+      results.push({ file: file.name, index: i + 1, status: 'error', content: '', message: e?.message || '解析异常' });
+    }
+    void decodeWithjsQR;
+  }
+  onProgress(0.9, '生成结果文件');
+  const ok = results.filter(r => r.status === 'ok');
+  const fail = results.filter(r => r.status !== 'ok');
+  const contents: string[] = [];
+  if (exportFmt === 'csv') {
+    contents.push('index,filename,status,message,content');
+    for (const r of results) {
+      contents.push(`${r.index},"${r.file.replace(/"/g, '""')}",${r.status},"${(r.message || '').replace(/"/g, '""')}","${r.content.replace(/"/g, '""')}"`);
+    }
+  } else {
+    for (const r of results) {
+      const header = `#${r.index} [${r.status.toUpperCase()}] ${r.file}${r.message ? '  · ' + r.message : ''}`;
+      contents.push(header + '\n' + (r.content || '(空)') + '\n');
+    }
+  }
+  const blob = new Blob([contents.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const ext = exportFmt;
+  onProgress(1);
+  return {
+    blob, ext, fileName: 'MendFile_二维码识别结果_' + total + '张',
+    preview: {
+      stats: [
+        { label: '解析图片数', value: total.toString() + ' 张' },
+        { label: '成功', value: ok.length.toString() + ' 张' },
+        { label: '未识别/异常', value: fail.length.toString() + ' 张' },
+      ],
+      thumbnails: ok.slice(0, 3).map(r => {
+        try {
+          const qr = buildQR(r.content.slice(0, 500), 'M');
+          const canvas = document.createElement('canvas');
+          canvas.width = 160; canvas.height = 160;
+          drawQRModulesToCanvas(qr, canvas, '#111827', '#ffffff', 'square');
+          return canvas.toDataURL('image/png');
+        } catch { return ''; }
+      }).filter(Boolean),
+      // @ts-ignore 向前兼容：resultList 由 tool page 的 panel 展示（ProcessOutput 类型宽松可忽略）
+      resultList: results as any,
+    },
   };
 };

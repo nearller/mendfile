@@ -1064,6 +1064,101 @@ function OptionsPanel(props: {
         </div>
       </div>
     ),
+
+    /* =====================================
+     *  二期 · 批次 2 · 二维码工具参数面板
+     * ===================================== */
+    'qr-generate': (
+      <QrGeneratePanel options={options} update={update} disabled={disabled} />
+    ),
+    'qr-batch': (
+      <div className="space-y-4">
+        <Field label="批量内容（每行一条，最多 10000 条）" colSpan={1} hint="空行会被自动忽略。示例：\nhttps://mendfile.com\n联系电话：400-000-0000\n张三 - 销售经理 - 工号001">
+          <textarea className="input min-h-[160px] font-mono text-xs leading-5 resize-y"
+            disabled={disabled}
+            value={options.lines ?? ''}
+            onChange={(e) => update({ lines: e.target.value })}
+            placeholder={'例如：\nhttps://mendfile.com\nhttps://example.com\n联系电话：400-000-0000'} />
+          <div className="mt-1 text-[11px] text-slate-500">
+            当前 {String((options.lines ?? '').split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean).length)} 条有效内容
+          </div>
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Field label="容错等级" hint="L=7%｜M=15%｜Q=25%｜H=30%（支持更大 Logo 叠加）">
+            <select className="input" disabled={disabled} value={options.ecLevel || 'M'}
+              onChange={(e) => update({ ecLevel: e.target.value })}>
+              <option value="L">L · 约 7%（最快）</option>
+              <option value="M">M · 约 15%（日常推荐）</option>
+              <option value="Q">Q · 约 25%（较强容错）</option>
+              <option value="H">H · 约 30%（最大容错，推荐 Logo 叠加）</option>
+            </select>
+          </Field>
+          <Field label={`尺寸 ${options.size || 512}×${options.size || 512} px`}>
+            <input type="range" min={128} max={2000} step={32}
+              value={options.size || 512}
+              disabled={disabled}
+              onChange={(e) => update({ size: Number(e.target.value) })} />
+            <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>128</span><span>2000</span></div>
+          </Field>
+          <Field label="前背景色">
+            <div className="flex items-center gap-2 h-10">
+              <input type="color" className="h-10 w-12 rounded-lg border border-slate-200 bg-white cursor-pointer"
+                value={options.fgColor || '#111827'} disabled={disabled}
+                onChange={(e) => update({ fgColor: e.target.value })} />
+              <span className="text-slate-400 text-sm">→</span>
+              <input type="color" className="h-10 w-12 rounded-lg border border-slate-200 bg-white cursor-pointer"
+                value={options.bgColor || '#ffffff'} disabled={disabled}
+                onChange={(e) => update({ bgColor: e.target.value })} />
+            </div>
+          </Field>
+          <Field label="点样式">
+            <select className="input" disabled={disabled} value={options.dotStyle || 'square'}
+              onChange={(e) => update({ dotStyle: e.target.value })}>
+              <option value="square">■ 方形（经典）</option>
+              <option value="rounded">▢ 圆角（柔和）</option>
+              <option value="dot">● 圆点（活泼）</option>
+            </select>
+          </Field>
+          <Field label="文件名前缀" hint="ZIP 内部文件名：前缀_001.png / 前缀_002.png …">
+            <input type="text" className="input" value={options.fileNamePrefix || 'qrcode'}
+              disabled={disabled} onChange={(e) => update({ fileNamePrefix: e.target.value })} />
+          </Field>
+          <Field label="输出格式">
+            <select className="input" disabled={disabled} value={options.format || 'png'}
+              onChange={(e) => update({ format: e.target.value })}>
+              <option value="png">PNG（无损透明推荐）</option>
+              <option value="jpg">JPG（体积更小）</option>
+            </select>
+          </Field>
+          <Field label={`JPG 质量 ${options.quality ?? 92}%`} hint="仅 JPG 生效，PNG 始终无损">
+            <input type="range" min={40} max={100} step={1}
+              value={options.quality ?? 92}
+              disabled={disabled}
+              onChange={(e) => update({ quality: Number(e.target.value) })} />
+          </Field>
+        </div>
+      </div>
+    ),
+    'qr-parse': (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="识别结果导出格式">
+          <select className="input" disabled={disabled}
+            value={options.exportFormat || 'txt'}
+            onChange={(e) => update({ exportFormat: e.target.value })}>
+            <option value="txt">TXT（按条分组注释，便于阅读复制）</option>
+            <option value="csv">CSV（序号/文件/状态/消息/内容，便于 Excel 分析）</option>
+          </select>
+        </Field>
+        <div className="text-xs text-slate-500 bg-slate-100/60 rounded-lg p-3 leading-5 flex items-start gap-2">
+          <span>ℹ️</span>
+          <div>
+            <p><strong>使用建议</strong>：图片像素 ≥ 200×200，图像平整无倾斜、无强烈反光可大幅提升识别率。</p>
+            <p className="mt-1">单次最多 <strong>50 张</strong> 图片，若有大量照片可按 50 张一组分批处理。</p>
+            <p className="mt-1">当前仅支持<strong>标准 QR Code</strong>，Aztec / DataMatrix / Code128 等其他条码暂不支持。</p>
+          </div>
+        </div>
+      </div>
+    ),
   };
 
   if (!panels[toolKey]) return null;
@@ -1276,4 +1371,148 @@ function structuredCloneSafe<T>(v: T): T {
     if (typeof structuredClone === 'function') return structuredClone(v);
   } catch { /* ignore */ }
   return JSON.parse(JSON.stringify(v));
+}
+
+// ============================================================
+// 批次 2 · 美化二维码生成 · 专属参数面板（6 模板一键应用）
+// ============================================================
+interface QrGeneratePanelProps { options: any; update: (patch: any) => void; disabled: boolean; }
+const QR_TEMPLATES: Array<{ k: string; label: string; desc: string; fg: string; bg: string; dot: 'square' | 'rounded' | 'dot'; chip: string }> = [
+  { k: 'default',  label: '经典黑',   desc: '方形 / 黑 · 白',          fg: '#111827', bg: '#ffffff', dot: 'square',  chip: 'from-slate-900 to-slate-600' },
+  { k: 'business', label: '商务蓝',   desc: '方形 / 深蓝 · 白',        fg: '#1d4ed8', bg: '#ffffff', dot: 'square',  chip: 'from-blue-700 to-sky-400' },
+  { k: 'sakura',   label: '樱花粉',   desc: '圆角 / 玫红 · 粉白',      fg: '#be185d', bg: '#fff1f2', dot: 'rounded', chip: 'from-pink-500 to-rose-300' },
+  { k: 'gold',     label: '渐变金',   desc: '方形 / 琥珀 · 米黄',      fg: '#b45309', bg: '#fffbeb', dot: 'square',  chip: 'from-amber-500 to-yellow-300' },
+  { k: 'tech',     label: '科技青',   desc: '圆点 / 青蓝 · 冰白',      fg: '#0e7490', bg: '#ecfeff', dot: 'dot',     chip: 'from-cyan-600 to-sky-400' },
+  { k: 'vintage',  label: '复古棕',   desc: '圆角 / 深棕 · 米杏',      fg: '#78350f', bg: '#fef3c7', dot: 'rounded', chip: 'from-amber-800 to-orange-400' },
+];
+function QrGeneratePanel({ options, update, disabled }: QrGeneratePanelProps) {
+  const applyTemplate = (k: string) => {
+    const tpl = QR_TEMPLATES.find(t => t.k === k);
+    if (!tpl) return;
+    update({ template: k, fgColor: tpl.fg, bgColor: tpl.bg, dotStyle: tpl.dot });
+  };
+  const contentLen = String(options?.content ?? '').length;
+  return (
+    <div className="space-y-4">
+      {/* 内容输入 */}
+      <div>
+        <Field label="二维码内容（链接 / 文本 / 联系方式）" colSpan={1} hint="中文与英文均可，内容越长二维码越密建议提高容错等级">
+          <textarea className="input min-h-[110px] font-mono text-xs sm:text-sm leading-5 resize-y"
+            disabled={disabled}
+            value={options?.content ?? ''}
+            onChange={(e) => update({ content: e.target.value })}
+            placeholder={'例如：\nhttps://mendfile.com\n公司：某某科技有限公司\n电话：400-000-0000\n邮箱：hi@mendfile.com'} />
+          <div className="mt-1 text-[11px] text-slate-500">当前 {contentLen} 字符 · 建议普通 URL 文本 ≤ 500 字，H 级容错下汉字约 ≤ 180 字</div>
+        </Field>
+      </div>
+
+      {/* 6 套模板卡片 */}
+      <Field label="一键主题模板（点击自动应用配色与点样式）" colSpan={1}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          {QR_TEMPLATES.map((tpl) => {
+            const active = String(options?.template || 'default') === tpl.k;
+            return (
+              <button key={tpl.k} type="button" disabled={disabled} onClick={() => applyTemplate(tpl.k)}
+                className={`text-left p-2.5 rounded-xl border transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
+                  active ? 'border-brand-500 bg-brand-50/70 ring-2 ring-brand-300/40 shadow-sm' : 'border-slate-200 bg-white hover:border-brand-300 hover:shadow-sm'
+                }`}>
+                <div className={`w-full h-10 rounded-md mb-2 bg-gradient-to-br ${tpl.chip} relative overflow-hidden`} aria-hidden>
+                  {/* 装饰点阵示意 */}
+                  <svg viewBox="0 0 40 40" className="absolute inset-0 w-full h-full opacity-40 mix-blend-overlay" fill="white" xmlns="http://www.w3.org/2000/svg">
+                    {Array.from({ length: 8 * 8 }).map((_, i) => {
+                      const r = i >> 3, c = i & 7; if (((r * 7 + c * 3) % 5) !== 0) return null;
+                      return <rect key={i} x={4 + c * 4} y={4 + r * 4} width={3} height={3} rx={tpl.dot === 'dot' ? 2 : (tpl.dot === 'rounded' ? 1 : 0)} />;
+                    })}
+                  </svg>
+                </div>
+                <div className={`text-sm font-semibold ${active ? 'text-brand-700' : 'text-slate-800'}`}>{tpl.label}</div>
+                <div className="text-[11px] text-slate-500 leading-4 mt-0.5">{tpl.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+      </Field>
+
+      {/* 尺寸 / 容错 / 颜色 / 样式 / 输出 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <Field label="容错等级" hint="H(30%) 支持覆盖最大面积 Logo">
+          <select className="input" disabled={disabled} value={options?.ecLevel || 'M'}
+            onChange={(e) => update({ ecLevel: e.target.value })}>
+            <option value="L">L · 约 7%（最快 · 最小体积）</option>
+            <option value="M">M · 约 15%（日常推荐）</option>
+            <option value="Q">Q · 约 25%（较强容错）</option>
+            <option value="H">H · 约 30%（加 Logo 请选此项）</option>
+          </select>
+        </Field>
+        <Field label={`输出尺寸 ${Number(options?.size || 512)}×${Number(options?.size || 512)} px`}>
+          <input type="range" min={128} max={2000} step={32}
+            value={Number(options?.size || 512)}
+            disabled={disabled}
+            onChange={(e) => update({ size: Number(e.target.value) })} />
+          <div className="flex justify-between text-[11px] text-slate-400 mt-1"><span>128</span><span>2000</span></div>
+        </Field>
+        <Field label="前景色 / 背景色">
+          <div className="flex items-center gap-2 h-10">
+            <input type="color" className="h-10 w-12 rounded-lg border border-slate-200 bg-white cursor-pointer"
+              value={options?.fgColor || '#111827'} disabled={disabled}
+              onChange={(e) => update({ fgColor: e.target.value })} />
+            <span className="text-slate-400 text-sm">→</span>
+            <input type="color" className="h-10 w-12 rounded-lg border border-slate-200 bg-white cursor-pointer"
+              value={options?.bgColor || '#ffffff'} disabled={disabled}
+              onChange={(e) => update({ bgColor: e.target.value })} />
+          </div>
+        </Field>
+        <Field label="点阵样式">
+          <select className="input" disabled={disabled} value={options?.dotStyle || 'square'}
+            onChange={(e) => update({ dotStyle: e.target.value })}>
+            <option value="square">■ 方形（经典）</option>
+            <option value="rounded">▢ 圆角（柔和）</option>
+            <option value="dot">● 圆点（活泼）</option>
+          </select>
+        </Field>
+        <Field label="输出格式">
+          <select className="input" disabled={disabled} value={options?.outputFormat || 'png'}
+            onChange={(e) => update({ outputFormat: e.target.value })}>
+            <option value="png">PNG 位图（通用易分享）</option>
+            <option value="svg">SVG 矢量（无损放大 · 印刷推荐）</option>
+          </select>
+        </Field>
+      </div>
+
+      {/* Logo 叠加 */}
+      <Field label="Logo 图片叠加（可选，居中 20% 区域）" colSpan={1}
+        hint="建议容错等级设为 H，以保证识别率；Logo 过大会导致识别失败，建议使用简洁清晰的小图标。">
+        <input type="file" accept="image/png,image/jpeg,image/webp" className="input" disabled={disabled}
+          onChange={async (e) => {
+            const f = e.target.files?.[0]; if (!f) return;
+            const d = await readAsDataURL(f);
+            update({ logoDataURL: d });
+          }} />
+        {options?.logoDataURL ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2.5">
+              <div className="w-14 h-14 grid place-items-center rounded-md border border-slate-200"
+                style={{ background: options?.bgColor || '#fff' }}>
+                <img src={options?.logoDataURL} alt="Logo 预览" className="max-w-10 max-h-10 object-contain" />
+              </div>
+              <div className="text-xs text-slate-600 leading-5">
+                <div className="font-semibold text-slate-800">✅ Logo 已载入</div>
+                <div>将居中叠加于二维码之上（约 22% 面积）</div>
+                <button type="button" disabled={disabled}
+                  onClick={() => update({ logoDataURL: '' })}
+                  className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 disabled:opacity-50">
+                  🗑 移除 Logo
+                </button>
+              </div>
+            </div>
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 leading-5 max-w-sm">
+              ⚠️ 请在生成后用手机实际扫码验证。若识别失败请提升容错等级至 Q/H 或移除 Logo。
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2 text-[11px] text-slate-500">未选择 Logo 将输出纯净二维码。推荐 PNG 格式、圆形或方形透明图标、边长 ≥ 512 px。</div>
+        )}
+      </Field>
+    </div>
+  );
 }

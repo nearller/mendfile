@@ -10,8 +10,35 @@ import { CATEGORY_META, TOOLS_CONFIG, type ToolCategory } from '@/config/tools';
  *  - 明确预留【二维码工具】【图片长图工具】两大分类入口（"敬请期待"占位），方便后期无缝拓展
  *  - Hero + 工具区 + SEO 段落 + 为什么选择我们
  */
+const RESERVED_BY_CATEGORY: Record<string, Array<{ emoji: string; title: string; desc: string }>> = {
+  qr: [
+    { emoji: '📱', title: '二维码生成与解码', desc: '批量生成、Logo嵌入、矢量导出、扫码解析' },
+    { emoji: '🧾', title: '二维码批量生成器', desc: '从 Excel/CSV 批量生成二维码并打包下载' },
+    { emoji: '🎨', title: '艺术二维码', desc: '自定义配色+背景+Logo，可商用美术二维码' },
+    { emoji: '🏷️', title: '条形码生成', desc: 'EAN13 / Code128 / UPC / ITF 等常用条码' },
+  ],
+  image: [
+    { emoji: '🧩', title: '图片长图拼接', desc: '批量拼接、加水印、分辨率调整、格式互转' },
+    { emoji: '🎨', title: '在线图片编辑器', desc: '裁剪、调色、磨皮、加框、加水印等一站式修图' },
+    { emoji: '🗜️', title: '图片压缩', desc: 'JPG/PNG/WEBP 批量压缩，支持 kb 级别目标大小' },
+    { emoji: '🔄', title: '图片格式互转', desc: 'JPG / PNG / WEBP / BMP / ICO 一键互转' },
+  ],
+  media: [
+    { emoji: '🎞️', title: '视频压缩', desc: 'MP4 / MOV / MKV 轻量压缩，体积可降 40~70%' },
+    { emoji: '✂️', title: '视频裁剪/格式转换', desc: '截取片段、旋转翻转、MP4→WebM→GIF 互转' },
+    { emoji: '🎵', title: '音频压缩', desc: 'MP3 / WAV / M4A / AAC 轻量压缩，体积更小更便携' },
+    { emoji: '🎙️', title: '音频裁剪/格式转换', desc: '截取片段、调音量、格式互转，铃声制作好帮手' },
+  ],
+  office: [
+    { emoji: '📝', title: '文本批量处理', desc: '去空格、繁简互转、数据脱敏、文档差异对比' },
+    { emoji: '⏰', title: '工时/时间戳转换', desc: '工时计算、Unix<->北京时间、Excel 日期互转' },
+    { emoji: '🔑', title: '密码生成器', desc: '强密码 / 伪随机码 / API Key 批量生成，支持自定义规则' },
+    { emoji: '📐', title: '单位换算器', desc: '长度/重量/面积/货币/时间等办公常用单位换算' },
+  ],
+};
+
 export default function HomePage() {
-  const order: ToolCategory[] = ['convert', 'organize', 'watermark', 'optimize', 'qr', 'image'];
+  const order: ToolCategory[] = ['convert', 'organize', 'watermark', 'optimize', 'image', 'qr', 'media', 'office'];
 
   return (
     <>
@@ -75,7 +102,7 @@ export default function HomePage() {
         {order.map((catKey) => {
           const catMeta = CATEGORY_META[catKey];
           const list = Object.values(TOOLS_CONFIG).filter((t) => t.category === catKey);
-          const isReserved = catKey === 'qr' || catKey === 'image';
+          const isReserved = list.length === 0;
           return (
             <section key={catKey} id={`cat-${catKey}`}>
               <div className="flex items-end justify-between mb-4 gap-3">
@@ -94,28 +121,9 @@ export default function HomePage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {isReserved ? (
-                  <>
-                    <ReservedCard
-                      emoji={catKey === 'qr' ? '📱' : '🧩'}
-                      title={catKey === 'qr' ? '二维码生成与解码' : '图片长图拼接'}
-                      desc={catKey === 'qr' ? '批量生成、Logo嵌入、矢量导出、扫码解析' : '批量拼接、加水印、分辨率调整、格式互转'}
-                    />
-                    <ReservedCard
-                      emoji={catKey === 'qr' ? '🧾' : '🎨'}
-                      title={catKey === 'qr' ? '二维码批量生成器' : '在线图片编辑器'}
-                      desc={catKey === 'qr' ? '从 Excel/CSV 批量生成二维码并打包下载' : '裁剪、调色、磨皮、加框、加水印等一站式修图'}
-                    />
-                    <ReservedCard
-                      emoji={catKey === 'qr' ? '🎨' : '🗜️'}
-                      title={catKey === 'qr' ? '艺术二维码' : '图片压缩'}
-                      desc={catKey === 'qr' ? '自定义配色+背景+Logo，可商用美术二维码' : 'JPG/PNG/WEBP 批量压缩，支持 kb 级别目标大小'}
-                    />
-                    <ReservedCard
-                      emoji={catKey === 'qr' ? '🏷️' : '🔄'}
-                      title={catKey === 'qr' ? '条形码生成' : '图片格式互转'}
-                      desc={catKey === 'qr' ? 'EAN13 / Code128 / UPC / ITF 等常用条码' : 'JPG / PNG / WEBP / BMP / ICO 一键互转'}
-                    />
-                  </>
+                  (RESERVED_BY_CATEGORY[catKey] || []).map((c, i) => (
+                    <ReservedCard key={i} emoji={c.emoji} title={c.title} desc={c.desc} />
+                  ))
                 ) : (
                   list.map((t) => (
                     <Link

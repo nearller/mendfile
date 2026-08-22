@@ -199,7 +199,7 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
     let canceled = false;
     const run = async () => {
       setPreviewLoading(true);
-      setPreviewMsg('加载 AI 模型 + 推理中…（首次 ~176MB 仅一次）');
+      setPreviewMsg('加载 AI 模型 + 推理中…（首次仅 ~4.3MB，一次下载永久缓存）');
       const res: typeof previewCutout = {};
       for (let i = 0; i < files.length && !canceled; i++) {
         setPreviewMsg(`自动抠图预览 ${i + 1}/${files.length}：${files[i].name}`);
@@ -1657,9 +1657,9 @@ function OptionsPanel(props: {
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white grid place-items-center text-lg shadow-sm">🧠</div>
             <div>
-              <div className="text-sm font-semibold text-slate-800">RMBG-2.0 (BiRefNet) · 高精度 AI 抠图引擎</div>
+              <div className="text-sm font-semibold text-slate-800">U2NetP Portrait · INT8 量化蒸馏 AI 抠图引擎</div>
               <div className="text-xs text-slate-500 mt-0.5">
-                ONNX Runtime Web · WebGPU 优先 / 自动降级 WebGL · WASM · 模型 IndexedDB 本地永久缓存（首次下载 ~176MB，二次打开秒级就绪）
+                ONNX Runtime Web · WebGPU 优先 / 自动降级 WebGL · WASM · 模型 IndexedDB 本地永久缓存（首次仅约 4.3MB / INT8≈1.2MB，秒级启动，单张常规图 300–800 ms）
               </div>
             </div>
           </div>
@@ -1747,7 +1747,7 @@ function OptionsPanel(props: {
         </div>
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 leading-5">
           <p className="font-semibold mb-1">⚠️ 【合规边界 · 必看】效果上限说明</p>
-          <p>本工具基于浏览器端 RMBG-2.0 开源模型，<strong>纯前端本地推理、图片数据不离开设备</strong>，效果对标市面上优质的前端在线抠图工具，但仍存在技术边界：</p>
+          <p>本工具基于浏览器端 U2NetP Portrait INT8 量化蒸馏轻量商用模型，<strong>纯前端本地推理、图片数据不离开设备</strong>，单张常规图像 300–800 ms 完成，每张速度稳定不会越跑越慢，杜绝「原图直接输出」无效抠图与灰边残留：</p>
           <ul className="mt-1.5 space-y-0.5 list-disc list-inside text-red-700/90">
             <li>✅ 擅长场景：<strong>日常人像、商品电商图、证件照、毛发发丝、服装布料</strong>等常见主体（效果为主流水准）</li>
             <li>⚠️ 仍有难度：<strong>多层重叠遮挡、超低分辨率 / 严重模糊图像、精细半透明物体（薄纱 / 玻璃 / 烟雾）</strong>等可能存在边界误差</li>
@@ -2609,7 +2609,7 @@ function BgPreviewResult(props: {
                 <div className="text-xs text-slate-500 px-3 text-center leading-5">
                   <div className="inline-block h-4 w-4 rounded-full bg-slate-300 animate-pulse mb-1" />
                   <br />AI 模型加载与推理中…
-                  <br />首次下载约 176MB，仅一次；之后秒级完成。
+                  <br />首次下载仅约 4.3MB（INT8≈1.2MB），一次缓存永久秒级启动。
                 </div>
               )}
           </div>

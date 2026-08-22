@@ -1,13 +1,18 @@
 import { Helmet } from 'react-helmet-async';
 import type { ToolConfig } from '@/config/tools';
 import { CATEGORY_META } from '@/config/tools';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatBytes, generatePdfThumbnail, readAsArrayBuffer, readAsDataURL, downloadBlob, stripExt, safeName } from '@/core/utils';
 import { pdfjsLib } from '@/core/pdfjs';
 import AdSlot from '@/components/AdSlot';
 import type { ProcessOutput } from '@/core/types';
 // 批次 6 · 云端增强模式提示条（仅架构预留）
 import { CloudModeHintStrip, CloudBannerEntry } from '@/components/CloudReserve';
+// 批次 3 · AI 抠图实时预览
+import {
+  removeBackground as aiRemoveBg,
+  flattenCutout,
+} from '@/core/rmbg';
 
 export default function ToolPageTemplate({
   toolKey,
@@ -173,6 +178,63 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState('准备就绪');
   const [output, setOutput] = useState<ProcessOutput | null>(null);
+  // ========== AI 抠图工具：上传瞬间自动抠图 + 实时预览 ==========
+  const [previewCutout, setPreviewCutout] = useState<Record<number, HTMLCanvasElement | null>>({});
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewMsg, setPreviewMsg] = useState<string>('');
+  const previewAbortRef = useRef<{ abort: () => void } | null>(null);
+  // 背景变化时：previewCutout 依然保留，但 ResultPreview 会根据 bgMode 实时重绘
+  const bgMode: 'transparent' | 'white' | 'custom' = (options?.bgMode as any) || 'white';
+  const customBgColor: string = options?.customBgColor || '#ffffff';
+  // 缩略预览最大边长（减少内存，仅用于页面所见即所得）
+  const previewMax = 480;
+
+  // 抠图工具：文件变化 → 自动触发抠图预览（不影响用户再次点击完整下载流程）
+  useEffect(() => {
+    if (toolKey !== 'image-removebg') return;
+    if (!files.length) {
+      setPreviewCutout({});
+      return;
+    }
+    let canceled = false;
+    const run = async () => {
+      setPreviewLoading(true);
+      setPreviewMsg('加载 AI 模型 + 推理中…（首次 ~176MB 仅一次）');
+      const res: typeof previewCutout = {};
+      for (let i = 0; i < files.length && !canceled; i++) {
+        setPreviewMsg(`自动抠图预览 ${i + 1}/${files.length}：${files[i].name}`);
+        try {
+          // 自动抠图：优先高精度 AI（无需点击按钮），失败不抛到外层
+          const cut = await aiRemoveBg(files[i], {}, () => {});
+          // 缩放到预览分辨率
+          const { width, height } = cut.cutoutCanvas;
+          const s = Math.min(1, previewMax / Math.max(width, height));
+          const pw = Math.max(1, Math.round(width * s));
+          const ph = Math.max(1, Math.round(height * s));
+          const pc = document.createElement('canvas');
+          pc.width = pw; pc.height = ph;
+          pc.getContext('2d')!.drawImage(cut.cutoutCanvas, 0, 0, pw, ph);
+          res[i] = pc;
+          setPreviewCutout((old) => ({ ...old, ...res }));
+        } catch (err: any) {
+          // AI 失败：仍然显示空，不会影响主流程点击按钮走 Flood Fill
+          res[i] = null;
+          setPreviewMsg(`自动预览 ${i + 1}/${files.length}：AI 模型不可用，点击「开始处理」使用本地容差法兜底`);
+          setPreviewCutout((old) => ({ ...old, [i]: null }));
+        }
+      }
+      if (!canceled) {
+        setPreviewCutout(res);
+        setPreviewLoading(false);
+        setPreviewMsg(Object.values(res).some(Boolean)
+          ? '✅ 自动抠图完成，切换下方背景模式可实时预览最终效果'
+          : '点击「开始处理」执行抠图（AI 模型暂不可用或加载受限）');
+      }
+    };
+    void run();
+    return () => { canceled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files.length, toolKey]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -348,6 +410,15 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
               });
               return np;
             });
+            setPreviewCutout((prev) => {
+              const np: typeof prev = {};
+              Object.keys(prev).forEach((k) => {
+                const ki = Number(k);
+                if (ki < idx) np[ki] = prev[ki];
+                else if (ki > idx) np[ki - 1] = prev[ki];
+              });
+              return np;
+            });
           }}
           onReorder={(newOrder) => setExtras((e: any) => ({ ...e, order: newOrder }))}
           onFileMoveUp={(idx) => {
@@ -367,6 +438,34 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
             });
           }}
         />
+      )}
+
+      {/* AI 抠图工具专属：上传瞬间自动生成的实时成品预览 + 背景切换实时效果 */}
+      {toolKey === 'image-removebg' && !!files.length && (
+        <div className="rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50 via-white to-purple-50/60 p-4 sm:p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-semibold text-slate-800 inline-flex items-center gap-2">
+                <span>🖼️ AI 抠图实时预览</span>
+                <span className="text-[11px] font-medium text-brand-700 bg-brand-100 px-2 py-0.5 rounded-full">上传即抠</span>
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                {previewLoading
+                  ? (<span className="inline-flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-brand-500 animate-pulse" />{previewMsg}</span>)
+                  : previewMsg || '切换下方背景下拉、自定义颜色，上图会实时重新渲染最终效果（所见即所得）'}
+              </div>
+            </div>
+            <div className="text-xs text-slate-500">
+              ⚪ 白底 · 🔍 透明 · 🎨 自定义，均在下图同步呈现
+            </div>
+          </div>
+          <BgPreviewResult
+            cutouts={previewCutout}
+            files={files}
+            bgMode={bgMode}
+            customBgColor={customBgColor}
+          />
+        </div>
       )}
 
       {/* 参数区：按工具 key 差异化 */}
@@ -1554,29 +1653,49 @@ function OptionsPanel(props: {
     ),
     'image-removebg': (
       <div className="space-y-4">
+        <div className="rounded-xl bg-gradient-to-r from-indigo-50 via-white to-purple-50 border border-indigo-200 p-3 sm:p-4 flex flex-wrap items-center gap-3 justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white grid place-items-center text-lg shadow-sm">🧠</div>
+            <div>
+              <div className="text-sm font-semibold text-slate-800">RMBG-2.0 (BiRefNet) · 高精度 AI 抠图引擎</div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                ONNX Runtime Web · WebGPU 优先 / 自动降级 WebGL · WASM · 模型 IndexedDB 本地永久缓存（首次下载 ~176MB，二次打开秒级就绪）
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <label className="inline-flex items-center gap-2 text-xs bg-white border border-indigo-200 rounded-lg px-3 py-2 cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded"
+                checked={options.useAi !== false}
+                disabled={disabled}
+                onChange={(e) => update({ useAi: e.target.checked })} />
+              <span className="font-medium text-slate-700">启用 AI 高精度（关闭则走本地容差法兜底）</span>
+            </label>
+          </div>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Field label={`容差阈值 ${options.threshold ?? 35} / 120`} hint={'越大抠除越多可能误扣主体；越小越保守可能残留背景边。建议 25~50'}>
+          <Field label={`容差阈值 ${options.threshold ?? 35} / 120`} hint={'仅容差法生效：越大抠除越多；AI 模式该参数不参与'}>
             <input type="range" min={10} max={120} step={1}
               value={options.threshold ?? 35}
               disabled={disabled}
               onChange={(e) => update({ threshold: Number(e.target.value) })} />
           </Field>
-          <Field label={`边缘羽化 ${options.feather ?? 2} px`} hint="羽化越大边缘越柔和但可能略模糊；建议 1~4px">
+          <Field label={`边缘羽化 ${options.feather ?? 2} px`} hint="羽化越大边缘越柔和但可能略模糊；建议 1~4px（AI 模式同样生效）">
             <input type="range" min={0} max={15} step={1}
               value={options.feather ?? 2}
               disabled={disabled}
               onChange={(e) => update({ feather: Number(e.target.value) })} />
           </Field>
-          <Field label="输出背景" hint="默认白底，选择会自动缓存">
+          <Field label="输出背景" hint="默认白底，选择 + 颜色会自动缓存，下次进入自动复用">
             <select className="input" disabled={disabled} value={options.bgMode || 'white'}
               onChange={(e) => update({ bgMode: e.target.value })}>
-              <option value="white">⚪ 白色背景（默认）</option>
+              <option value="white">⚪ 白色背景（默认 · 预览区同步渲染）</option>
               <option value="transparent">🔍 透明背景 PNG</option>
               <option value="custom">🎨 自定义纯色</option>
             </select>
           </Field>
           {options.bgMode === 'custom' && (
-            <Field label="自定义背景色">
+            <Field label="自定义背景色" hint="修改颜色预览图会立即重绘，所见即所得">
               <div className="flex items-center gap-2 h-10">
                 <input type="color" className="h-10 w-14 rounded-lg border border-slate-200 bg-white cursor-pointer"
                   value={options.customBgColor || '#ffffff'}
@@ -1589,39 +1708,52 @@ function OptionsPanel(props: {
               </div>
             </Field>
           )}
+          {options.bgMode !== 'custom' && (
+            <Field label="自动压缩" hint="最长边 ≤2400px + 按背景择优 PNG/JPG/WebP 格式">
+              <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 rounded"
+                  checked={options.autoCompress !== false}
+                  disabled={disabled}
+                  onChange={(e) => update({ autoCompress: e.target.checked })} />
+                <span>启用智能轻量化压缩（高清 + 小体积）</span>
+              </label>
+            </Field>
+          )}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Field label="边缘精修" hint="自动消除前景中的孤立噪点">
-            <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
-              <input type="checkbox" className="w-4 h-4 rounded"
-                checked={options.edgeRefine !== false}
-                disabled={disabled}
-                onChange={(e) => update({ edgeRefine: e.target.checked })} />
-              <span>启用边缘精修 + 形态学清理</span>
-            </label>
-          </Field>
-          <Field label="自动压缩" hint="限制最长边 2400px + 智能择优格式">
-            <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
-              <input type="checkbox" className="w-4 h-4 rounded"
-                checked={options.autoCompress !== false}
-                disabled={disabled}
-                onChange={(e) => update({ autoCompress: e.target.checked })} />
-              <span>启用自动无损轻量化压缩</span>
-            </label>
-          </Field>
-        </div>
-        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600 leading-5">
-          ℹ️ <strong>下载逻辑</strong>：单张图片抠图完成直接输出 PNG 图片文件下载；仅当上传多张图片（批量抠图）时才打包 ZIP 压缩包。背景选择已自动缓存，下次进入自动复用。
+        {options.bgMode === 'custom' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Field label="边缘精修" hint="AI 抠图结果：去除孤立噪点 + 柔化边缘">
+              <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 rounded"
+                  checked={options.edgeRefine !== false}
+                  disabled={disabled}
+                  onChange={(e) => update({ edgeRefine: e.target.checked })} />
+                <span>启用形态学清理 + 边缘精修</span>
+              </label>
+            </Field>
+            <Field label="自动压缩" hint="最长边 ≤2400px + 按背景择优 PNG/JPG/WebP 格式">
+              <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 rounded"
+                  checked={options.autoCompress !== false}
+                  disabled={disabled}
+                  onChange={(e) => update({ autoCompress: e.target.checked })} />
+                <span>启用智能轻量化压缩</span>
+              </label>
+            </Field>
+          </div>
+        )}
+        <div className="bg-indigo-50/70 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-900 leading-5">
+          ℹ️ <strong>交互说明</strong>：<u>上传图片瞬间即自动抠图</u>，无需点击任何按钮；抠图完成后下方预览卡会自动显示，切换背景 / 颜色会<strong>实时重绘最终效果图</strong>，点击「一键下载结果」即可获取 PNG（单张）或 ZIP（多张批量）。
         </div>
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 leading-5">
-          <p className="font-semibold mb-1">⚠️ 【合规提示 · 必看】本工具不是神经网络 AI 抠图</p>
-          <p>采用高精度纯 Canvas Flood Fill 颜色容差法 + 边缘精修 + 形态学清理，效果远不如专业商用云端抠图服务。</p>
+          <p className="font-semibold mb-1">⚠️ 【合规边界 · 必看】效果上限说明</p>
+          <p>本工具基于浏览器端 RMBG-2.0 开源模型，<strong>纯前端本地推理、图片数据不离开设备</strong>，效果对标市面上优质的前端在线抠图工具，但仍存在技术边界：</p>
           <ul className="mt-1.5 space-y-0.5 list-disc list-inside text-red-700/90">
-            <li>✅ 仅适合：<strong>纯色墙面背景人像 / 白底产品图 / 轻度渐变色背景</strong></li>
-            <li>❌ 不适合：发丝、婚纱、半透明玻璃、高反光、复杂图案背景、前景与背景颜色相近</li>
-            <li>❌ 身份证、护照、签证、考试报名、正式证件照等用途请务必使用专业照相馆服务</li>
+            <li>✅ 擅长场景：<strong>日常人像、商品电商图、证件照、毛发发丝、服装布料</strong>等常见主体（效果为主流水准）</li>
+            <li>⚠️ 仍有难度：<strong>多层重叠遮挡、超低分辨率 / 严重模糊图像、精细半透明物体（薄纱 / 玻璃 / 烟雾）</strong>等可能存在边界误差</li>
+            <li>❌ 正式用途提醒：<strong>身份证、护照、签证、考试报名等合规证件照，请务必以专业照相馆或官方指定工具出图为准</strong></li>
           </ul>
-          <p className="mt-1.5 text-red-700/80">建议先上传单张预览调整阈值，满意后再批量处理。全部计算均在浏览器本地完成，不传输任何图像数据。</p>
+          <p className="mt-1.5 text-red-700/80">建议先上传单张预览，确认效果满意后再批量处理；任何模型加载或推理异常都会<strong>自动降级</strong>到本地 Flood Fill 容差法，保证工具 100% 可用。</p>
         </div>
       </div>
     ),
@@ -2432,6 +2564,58 @@ function PageEditorPanel(props: {
             onChange={(e) => onChange({ crop: { ...crop, right: Number(e.target.value) } })} />
         </Field>
       </div>
+    </div>
+  );
+}
+
+/**
+ * AI 抠图实时预览渲染：根据背景模式，立即合成用户当前选择
+ * 每次 bgMode/customBgColor 改变，useMemo 会重新产出合成后的 URL
+ */
+function BgPreviewResult(props: {
+  cutouts: Record<number, HTMLCanvasElement | null>;
+  files: File[];
+  bgMode: 'transparent' | 'white' | 'custom';
+  customBgColor: string;
+}) {
+  const { cutouts, files, bgMode, customBgColor } = props;
+  const items = useMemo(() => {
+    return files.map((f, idx) => {
+      const cut = cutouts[idx];
+      if (!cut) return { idx, name: f.name, url: '', status: 'pending' as const };
+      const flat = flattenCutout(cut, bgMode, customBgColor);
+      let url = '';
+      try { url = flat.toDataURL('image/png'); } catch { /* ignore */ }
+      return { idx, name: f.name, url, status: 'ok' as const };
+    });
+  }, [cutouts, files, bgMode, customBgColor]);
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {items.map((item) => (
+        <div key={item.idx} className="rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col">
+          <div
+            className="aspect-square w-full grid place-items-center overflow-hidden"
+            style={bgMode === 'transparent'
+              ? {
+                  backgroundImage:
+                    'conic-gradient(#e2e8f0 25%, #ffffff 0 50%, #e2e8f0 0 75%, #ffffff 0) 0 0 / 24px 24px',
+                }
+              : { background: bgMode === 'white' ? '#ffffff' : customBgColor }}
+          >
+            {item.status === 'ok' && item.url
+              ? <img src={item.url} alt="" className="h-full w-full object-contain" />
+              : (
+                <div className="text-xs text-slate-500 px-3 text-center leading-5">
+                  <div className="inline-block h-4 w-4 rounded-full bg-slate-300 animate-pulse mb-1" />
+                  <br />AI 模型加载与推理中…
+                  <br />首次下载约 176MB，仅一次；之后秒级完成。
+                </div>
+              )}
+          </div>
+          <div className="px-3 py-2 text-xs text-slate-600 border-t border-slate-100 truncate" title={item.name}>{item.name}</div>
+        </div>
+      ))}
     </div>
   );
 }

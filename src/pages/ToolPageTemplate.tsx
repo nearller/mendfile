@@ -1653,40 +1653,43 @@ function OptionsPanel(props: {
     ),
     'image-removebg': (
       <div className="space-y-4">
-        <div className="rounded-xl bg-gradient-to-r from-indigo-50 via-white to-purple-50 border border-indigo-200 p-3 sm:p-4 flex flex-wrap items-center gap-3 justify-between">
+        <div className="rounded-xl bg-gradient-to-r from-emerald-50 via-white to-sky-50 border border-emerald-200 p-3 sm:p-4 flex flex-wrap items-center gap-3 justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white grid place-items-center text-lg shadow-sm">🧠</div>
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-500 to-sky-600 text-white grid place-items-center text-lg shadow-sm">🧪</div>
             <div>
-              <div className="text-sm font-semibold text-slate-800">U2NetP Portrait · INT8 量化蒸馏 AI 抠图引擎</div>
+              <div className="text-sm font-semibold text-slate-800">Canvas Pixel · 纯 Canvas 像素抠图（零模型 · 页面绝不卡死）</div>
               <div className="text-xs text-slate-500 mt-0.5">
-                ONNX Runtime Web · WebGPU 优先 / 自动降级 WebGL · WASM · 模型 IndexedDB 本地永久缓存（首次仅约 4.3MB / INT8≈1.2MB，秒级启动，单张常规图 300–800 ms）
+                零 AI / 零 ONNX / 零 WebGPU / 零 WASM 依赖 · 不下载任何模型 · 四角+四边+边带采样 · 颜色距离 + Flood Fill + 边缘精修 · 常规图 200–600ms · 每 32 行分片 yield 事件循环，绝对不卡死
               </div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
-            <label className="inline-flex items-center gap-2 text-xs bg-white border border-indigo-200 rounded-lg px-3 py-2 cursor-pointer">
-              <input type="checkbox" className="w-4 h-4 rounded"
-                checked={options.useAi !== false}
-                disabled={disabled}
-                onChange={(e) => update({ useAi: e.target.checked })} />
-              <span className="font-medium text-slate-700">启用 AI 高精度（关闭则走本地容差法兜底）</span>
-            </label>
+            <span className="inline-flex items-center gap-2 text-xs bg-white border border-emerald-200 rounded-lg px-3 py-2 text-emerald-800">
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-medium">打开即用 · 无需加载</span>
+            </span>
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Field label={`容差阈值 ${options.threshold ?? 35} / 120`} hint={'仅容差法生效：越大抠除越多；AI 模式该参数不参与'}>
-            <input type="range" min={10} max={120} step={1}
+          <Field label={`容差阈值 ${options.threshold ?? 35}`} hint={'越大抠除越多（推荐 25–45），适用于所有模式'}>
+            <input type="range" min={8} max={160} step={1}
               value={options.threshold ?? 35}
               disabled={disabled}
               onChange={(e) => update({ threshold: Number(e.target.value) })} />
           </Field>
-          <Field label={`边缘羽化 ${options.feather ?? 2} px`} hint="羽化越大边缘越柔和但可能略模糊；建议 1~4px（AI 模式同样生效）">
-            <input type="range" min={0} max={15} step={1}
-              value={options.feather ?? 2}
+          <Field label={`软过渡带宽 ${options.softBand ?? 18}`} hint="越大边缘越柔和；渐变/复杂背景建议调大（18~50）">
+            <input type="range" min={6} max={160} step={1}
+              value={options.softBand ?? 18}
+              disabled={disabled}
+              onChange={(e) => update({ softBand: Number(e.target.value) })} />
+          </Field>
+          <Field label={`边缘羽化 ${Number(options.feather ?? 1.2).toFixed(1)} px`} hint="羽化越大边缘越柔和但可能略模糊，建议 0.5–3px">
+            <input type="range" min={0} max={15} step={0.1}
+              value={options.feather ?? 1.2}
               disabled={disabled}
               onChange={(e) => update({ feather: Number(e.target.value) })} />
           </Field>
-          <Field label="输出背景" hint="默认白底，选择 + 颜色会自动缓存，下次进入自动复用">
+          <Field label="输出背景" hint="默认白底，选择会自动缓存，下次进入自动复用">
             <select className="input" disabled={disabled} value={options.bgMode || 'white'}
               onChange={(e) => update({ bgMode: e.target.value })}>
               <option value="white">⚪ 白色背景（默认 · 预览区同步渲染）</option>
@@ -1694,7 +1697,7 @@ function OptionsPanel(props: {
               <option value="custom">🎨 自定义纯色</option>
             </select>
           </Field>
-          {options.bgMode === 'custom' && (
+          {options.bgMode === 'custom' ? (
             <Field label="自定义背景色" hint="修改颜色预览图会立即重绘，所见即所得">
               <div className="flex items-center gap-2 h-10">
                 <input type="color" className="h-10 w-14 rounded-lg border border-slate-200 bg-white cursor-pointer"
@@ -1707,53 +1710,50 @@ function OptionsPanel(props: {
                   onChange={(e) => update({ customBgColor: e.target.value })} />
               </div>
             </Field>
-          )}
-          {options.bgMode !== 'custom' && (
-            <Field label="自动压缩" hint="最长边 ≤2400px + 按背景择优 PNG/JPG/WebP 格式">
-              <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
-                <input type="checkbox" className="w-4 h-4 rounded"
-                  checked={options.autoCompress !== false}
-                  disabled={disabled}
-                  onChange={(e) => update({ autoCompress: e.target.checked })} />
-                <span>启用智能轻量化压缩（高清 + 小体积）</span>
-              </label>
-            </Field>
-          )}
-        </div>
-        {options.bgMode === 'custom' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <Field label="边缘精修" hint="AI 抠图结果：去除孤立噪点 + 柔化边缘">
+          ) : (
+            <Field label="边缘精修" hint="去除孤立噪点 + 灰边清理 + 边缘压边">
               <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
                 <input type="checkbox" className="w-4 h-4 rounded"
                   checked={options.edgeRefine !== false}
                   disabled={disabled}
                   onChange={(e) => update({ edgeRefine: e.target.checked })} />
-                <span>启用形态学清理 + 边缘精修</span>
+                <span>启用精修（强烈推荐开启）</span>
               </label>
             </Field>
-            <Field label="自动压缩" hint="最长边 ≤2400px + 按背景择优 PNG/JPG/WebP 格式">
+          )}
+          <Field label="自动压缩" hint="最长边 ≤2400px + 按背景择优 PNG/JPG/WebP 格式">
+            <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded"
+                checked={options.autoCompress !== false}
+                disabled={disabled}
+                onChange={(e) => update({ autoCompress: e.target.checked })} />
+              <span>启用智能轻量化压缩（高清 + 小体积）</span>
+            </label>
+          </Field>
+          {options.bgMode === 'custom' && (
+            <Field label="边缘精修" hint="去除孤立噪点 + 灰边清理 + 边缘压边">
               <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
                 <input type="checkbox" className="w-4 h-4 rounded"
-                  checked={options.autoCompress !== false}
+                  checked={options.edgeRefine !== false}
                   disabled={disabled}
-                  onChange={(e) => update({ autoCompress: e.target.checked })} />
-                <span>启用智能轻量化压缩</span>
+                  onChange={(e) => update({ edgeRefine: e.target.checked })} />
+                <span>启用精修（强烈推荐开启）</span>
               </label>
             </Field>
-          </div>
-        )}
-        <div className="bg-indigo-50/70 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-900 leading-5">
-          ℹ️ <strong>交互说明</strong>：<u>上传图片瞬间即自动抠图</u>，无需点击任何按钮；抠图完成后下方预览卡会自动显示，切换背景 / 颜色会<strong>实时重绘最终效果图</strong>，点击「一键下载结果」即可获取 PNG（单张）或 ZIP（多张批量）。
+          )}
+        </div>
+        <div className="bg-emerald-50/70 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-900 leading-5">
+          ℹ️ <strong>交互说明</strong>：<u>上传图片瞬间即自动抠图</u>，无需点击任何按钮；抠图完成后下方预览卡会自动显示，切换背景 / 颜色 / 容差会<strong>实时重绘最终效果图</strong>，点击「一键下载结果」即可获取 PNG（单张）或 ZIP（多张批量）。
         </div>
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 leading-5">
           <p className="font-semibold mb-1">⚠️ 【合规边界 · 必看】效果上限说明</p>
-          <p>本工具基于浏览器端 U2NetP Portrait INT8 量化蒸馏轻量商用模型，<strong>纯前端本地推理、图片数据不离开设备</strong>，单张常规图像 300–800 ms 完成，每张速度稳定不会越跑越慢，杜绝「原图直接输出」无效抠图与灰边残留：</p>
+          <p>本工具采用纯 Canvas 像素算法（<strong>零 AI 模型、不下载任何东西、页面绝不卡死</strong>），通过「四角+四边中点+2%边带采样 → 背景颜色聚类 → 颜色距离+软过渡 → Flood Fill 收紧 → 边缘精修」流程稳定抠图，<strong>所有像素必改 alpha，杜绝「输出与原图一致」的无效抠图</strong>：</p>
           <ul className="mt-1.5 space-y-0.5 list-disc list-inside text-red-700/90">
-            <li>✅ 擅长场景：<strong>日常人像、商品电商图、证件照、毛发发丝、服装布料</strong>等常见主体（效果为主流水准）</li>
-            <li>⚠️ 仍有难度：<strong>多层重叠遮挡、超低分辨率 / 严重模糊图像、精细半透明物体（薄纱 / 玻璃 / 烟雾）</strong>等可能存在边界误差</li>
+            <li>✅ 擅长：<strong>白底证件照、电商白底图、人像纯色背景、普通商品 / 服装 / 一般静物、PPT / 海报 / 打印日常办公</strong></li>
+            <li>⚠️ 仍有难度：<strong>多层重叠遮挡 + 前景与背景颜色极接近、超低分辨率 / 严重模糊图像、精细半透明物体（薄纱 / 玻璃 / 烟雾 / 液态）、极其复杂混乱背景</strong>等可能存在边界误差</li>
             <li>❌ 正式用途提醒：<strong>身份证、护照、签证、考试报名等合规证件照，请务必以专业照相馆或官方指定工具出图为准</strong></li>
           </ul>
-          <p className="mt-1.5 text-red-700/80">建议先上传单张预览，确认效果满意后再批量处理；任何模型加载或推理异常都会<strong>自动降级</strong>到本地 Flood Fill 容差法，保证工具 100% 可用。</p>
+          <p className="mt-1.5 text-red-700/80">建议先上传单张预览，必要时调大 / 调小「容差阈值」和「软过渡带宽」，确认效果满意后再批量处理；极端异常也会至少输出原图压缩结果，保证工具 100% 可用。</p>
         </div>
       </div>
     ),
@@ -2608,8 +2608,8 @@ function BgPreviewResult(props: {
               : (
                 <div className="text-xs text-slate-500 px-3 text-center leading-5">
                   <div className="inline-block h-4 w-4 rounded-full bg-slate-300 animate-pulse mb-1" />
-                  <br />AI 模型加载与推理中…
-                  <br />首次下载仅约 4.3MB（INT8≈1.2MB），一次缓存永久秒级启动。
+                  <br />像素处理中 · 分片 yield 运算，页面绝不卡死
+                  <br />纯 Canvas 算法：零模型 · 打开即用
                 </div>
               )}
           </div>

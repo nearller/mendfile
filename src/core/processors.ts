@@ -32,13 +32,14 @@ import qrcode from 'qrcode-generator';
 import jsQR from 'jsqr';
 // 批次 5 · 繁简字库（文本工具用）
 import { toSimplified, toTraditional, getDictSize } from '@/vendor/trad-simp';
-// 批次 3 · AI 抠图：U2NetP Portrait（INT8 量化蒸馏轻量商用）ONNX + IndexedDB 缓存（纯前端 ONNX Runtime Web）
+// 批次 3 · 抠图：纯 Canvas 像素算法（极致稳定优先 · 零模型 / 零 ONNX / 零 WebGPU / 零 WASM 依赖）
 import {
-  removeBackground as aiRemoveBg,
+  removeBackground,
   flattenCutout,
   compressCutoutBlob,
   getLastEp,
   resetSessionForTest,
+  type RmbgProgress,
 } from './rmbg';
 
 /**
@@ -2511,138 +2512,24 @@ export const imageEdit: ProcessFn = async ({ files, options }, onProgress) => {
     .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
 };
 
-/* ============ 3.5 前端高精度 AI 抠图（U2NetP Portrait INT8 量化蒸馏 ONNX + Flood Fill 兜底）============ */
-
-// Flood Fill 容差法（保留作为离线/受限网络/模型加载失败自动兜底，避免用户无法使用）
-// 输入参数复用 imageRemoveBg 外层函数里计算的 options
-async function legacyRemoveBgOnce(
-  f: File,
-  threshold: number,
-  feather: number,
-  bgIsTransparent: boolean,
-  bgRgb: { r: number; g: number; b: number },
-  edgeRefine: boolean,
-  autoCompress: boolean
-) {
-  const dataUrl = await readAsDataURL(f);
-  const img = await loadImage(dataUrl);
-  const MAX_LONG = autoCompress ? 2400 : 9999;
-  let w = img.naturalWidth, h = img.naturalHeight;
-  if (Math.max(w, h) > MAX_LONG) {
-    const scale = MAX_LONG / Math.max(w, h);
-    w = Math.round(w * scale);
-    h = Math.round(h * scale);
-  }
-  const canvas = document.createElement('canvas');
-  canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(img, 0, 0, w, h);
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const d = imgData.data;
-  const total = w * h;
-  let br = 0, bg = 0, bb = 0, count = 0;
-  for (let x = 0; x < w; x++) {
-    let i = x * 4; br += d[i]; bg += d[i + 1]; bb += d[i + 2]; count++;
-    i = ((h - 1) * w + x) * 4; br += d[i]; bg += d[i + 1]; bb += d[i + 2]; count++;
-  }
-  for (let y = 1; y < h - 1; y++) {
-    let i = y * w * 4; br += d[i]; bg += d[i + 1]; bb += d[i + 2]; count++;
-    i = (y * w + w - 1) * 4; br += d[i]; bg += d[i + 1]; bb += d[i + 2]; count++;
-  }
-  br = Math.round(br / count); bg = Math.round(bg / count); bb = Math.round(bb / count);
-  const thrSq = threshold * threshold;
-  const visited = new Uint8Array(total);
-  const stack = new Int32Array(total);
-  let sp = 0;
-  const isBg = (idx: number) => {
-    const i = idx * 4;
-    const dr = d[i] - br, dg = d[i + 1] - bg, db = d[i + 2] - bb;
-    return dr * dr + dg * dg + db * db <= thrSq;
-  };
-  for (let x = 0; x < w; x++) {
-    let idx = x; if (!visited[idx] && isBg(idx)) { visited[idx] = 1; stack[sp++] = idx; }
-    idx = (h - 1) * w + x; if (!visited[idx] && isBg(idx)) { visited[idx] = 1; stack[sp++] = idx; }
-  }
-  for (let y = 1; y < h - 1; y++) {
-    let idx = y * w; if (!visited[idx] && isBg(idx)) { visited[idx] = 1; stack[sp++] = idx; }
-    idx = y * w + w - 1; if (!visited[idx] && isBg(idx)) { visited[idx] = 1; stack[sp++] = idx; }
-  }
-  while (sp > 0) {
-    const idx = stack[--sp];
-    const x = idx % w;
-    const y = (idx / w) | 0;
-    if (x > 0) { const ni = idx - 1; if (!visited[ni] && isBg(ni)) { visited[ni] = 1; stack[sp++] = ni; } }
-    if (x < w - 1) { const ni = idx + 1; if (!visited[ni] && isBg(ni)) { visited[ni] = 1; stack[sp++] = ni; } }
-    if (y > 0) { const ni = idx - w; if (!visited[ni] && isBg(ni)) { visited[ni] = 1; stack[sp++] = ni; } }
-    if (y < h - 1) { const ni = idx + w; if (!visited[ni] && isBg(ni)) { visited[ni] = 1; stack[sp++] = ni; } }
-  }
-  const edgeBand = Math.max(15, threshold * 0.6);
-  const softMax = threshold + edgeBand;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = y * w + x;
-      const i = idx * 4;
-      if (visited[idx]) { d[i + 3] = 0; } else {
-        const adjBg = (x > 0 && visited[idx - 1]) || (x < w - 1 && visited[idx + 1])
-          || (y > 0 && visited[idx - w]) || (y < h - 1 && visited[idx + w]);
-        if (adjBg) {
-          const dr = d[i] - br, dg = d[i + 1] - bg, db = d[i + 2] - bb;
-          const dist = Math.sqrt(dr * dr + dg * dg + db * db);
-          if (dist <= softMax) {
-            const k = (dist - threshold) / edgeBand;
-            d[i + 3] = Math.round(255 * Math.max(0, Math.min(1, k)));
-          }
-        }
-      }
-    }
-  }
-  if (edgeRefine) {
-    const toRemove = new Uint8Array(total);
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        const idx = y * w + x;
-        if (!visited[idx] && d[idx * 4 + 3] > 0) {
-          let bgNeighbors = 0;
-          if (visited[idx - 1] || d[(idx - 1) * 4 + 3] === 0) bgNeighbors++;
-          if (visited[idx + 1] || d[(idx + 1) * 4 + 3] === 0) bgNeighbors++;
-          if (visited[idx - w] || d[(idx - w) * 4 + 3] === 0) bgNeighbors++;
-          if (visited[idx + w] || d[(idx + w) * 4 + 3] === 0) bgNeighbors++;
-          if (bgNeighbors >= 3) toRemove[idx] = 1;
-        }
-      }
-    }
-    for (let i = 0; i < total; i++) { if (toRemove[i]) { d[i * 4 + 3] = 0; visited[i] = 1; } }
-  }
-  if (feather > 0) featherAlpha(imgData, feather);
-  ctx.putImageData(imgData, 0, 0);
-  let outCanvas = canvas;
-  if (!bgIsTransparent) {
-    outCanvas = document.createElement('canvas');
-    outCanvas.width = w; outCanvas.height = h;
-    const octx = outCanvas.getContext('2d')!;
-    octx.fillStyle = `rgb(${bgRgb.r},${bgRgb.g},${bgRgb.b})`;
-    octx.fillRect(0, 0, w, h);
-    octx.drawImage(canvas, 0, 0);
-  }
-  return outCanvas;
-}
+/* ============ 3.5 纯 Canvas 像素抠图（极致稳定优先 · 零模型零卡死） ============ */
 
 export const imageRemoveBg: ProcessFn = async ({ files, options }, onProgress) => {
   onProgress(0.02, '准备处理');
-  const threshold = Math.max(10, Math.min(120, Number(options.threshold ?? 35)));
-  const feather = Math.max(0, Math.min(15, Number(options.feather ?? 2)));
+  const threshold = Math.max(8, Math.min(160, Number(options.threshold ?? 35)));
+  const feather = Math.max(0, Math.min(15, Number(options.feather ?? 1.2)));
   const bgMode: 'transparent' | 'white' | 'custom' = (options.bgMode as any) || 'white';
   const customBgColor: string = options.customBgColor || '#ffffff';
   const edgeRefine: boolean = options.edgeRefine !== false;
   const autoCompress: boolean = options.autoCompress !== false;
-  const useAi: boolean = options.useAi !== false; // 默认开启高精度 AI
+  const softBand = options.softBand != null ? Math.max(6, Math.min(160, Number(options.softBand))) : undefined;
 
   const bgIsTransparent = bgMode === 'transparent';
-  const bgFill = bgMode === 'custom' ? customBgColor : '#ffffff';
-  const bgRgb = hexToRgb(bgFill);
 
   const results: { name: string; blob: Blob }[] = [];
-  let usedEngine: 'ai' | 'legacy' | 'mixed' = 'ai';
+  let maxElapsedMs = 0;
+  let minElapsedMs = Infinity;
+  let elapsedSumMs = 0;
   let engineError: string | null = null;
 
   for (let fi = 0; fi < files.length; fi++) {
@@ -2651,35 +2538,42 @@ export const imageRemoveBg: ProcessFn = async ({ files, options }, onProgress) =
     onProgress(baseProg, `正在抠图 ${fi + 1}/${files.length}：${f.name}`);
 
     let cutout: HTMLCanvasElement | null = null;
-    let thisEngine: 'ai' | 'legacy' = 'ai';
-    if (useAi) {
-      try {
-        const result = await aiRemoveBg(f, { smooth: edgeRefine }, (_stage, ratio: any, m?: string) =>
-          onProgress(baseProg + (typeof ratio === 'number' ? ratio : 0) * 0.85, m ? `[${f.name}] ${m}` : undefined)
-        );
-        cutout = result.cutoutCanvas;
-      } catch (e: any) {
-        engineError = (e?.message || '模型加载失败').slice(0, 120);
-        resetSessionForTest();
-        // 自动降级 Flood Fill 容差法（保证 100% 可用）
-        onProgress(baseProg + 0.1, `⚠️ 高精度 AI 暂不可用，自动切换本地容差法：${engineError}`);
-        cutout = await legacyRemoveBgOnce(f, threshold, feather, true, bgRgb, edgeRefine, autoCompress);
-        thisEngine = 'legacy';
+    try {
+      const onRmbg: RmbgProgress = (_stage, ratio, m) =>
+        onProgress(baseProg + (typeof ratio === 'number' ? ratio : 0) * 0.85, m ? `[${f.name}] ${m}` : undefined);
+      const result = await removeBackground(
+        f,
+        { threshold, feather, edgeRefine, softBand },
+        onRmbg,
+      );
+      cutout = result.cutoutCanvas;
+      maxElapsedMs = Math.max(maxElapsedMs, result.elapsedMs);
+      minElapsedMs = Math.min(minElapsedMs, result.elapsedMs);
+      elapsedSumMs += result.elapsedMs;
+    } catch (e: any) {
+      engineError = (e?.message || '抠图失败').slice(0, 120);
+      // 极端容错：即使算法报错，也至少给个原图直出（压缩），避免用户"什么都得不到"
+      const dataUrl = await readAsDataURL(f);
+      const img = await loadImage(dataUrl);
+      const MAX_LONG = autoCompress ? 2400 : 9999;
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (Math.max(w, h) > MAX_LONG) {
+        const s = MAX_LONG / Math.max(w, h);
+        w = Math.round(w * s); h = Math.round(h * s);
       }
-    } else {
-      cutout = await legacyRemoveBgOnce(f, threshold, feather, true, bgRgb, edgeRefine, autoCompress);
-      thisEngine = 'legacy';
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      cutout = c;
     }
 
-    if (thisEngine === 'legacy' && usedEngine === 'ai') usedEngine = fi === 0 ? 'legacy' : 'mixed';
-    if (thisEngine === 'ai' && usedEngine === 'legacy') usedEngine = 'mixed';
-
-    // 可选羽化（AI 已经很精细，仅对 legacy 或用户显式指定时叠加）
-    if (feather > 0 && (thisEngine === 'legacy' || feather >= 3)) {
+    // 额外羽化（用户显式设置比较大时叠加）
+    const src = cutout!;
+    if (feather >= 3) {
       const tmp = document.createElement('canvas');
-      tmp.width = cutout.width; tmp.height = cutout.height;
+      tmp.width = src.width; tmp.height = src.height;
       const tctx = tmp.getContext('2d')!;
-      tctx.drawImage(cutout, 0, 0);
+      tctx.drawImage(src, 0, 0);
       const idata = tctx.getImageData(0, 0, tmp.width, tmp.height);
       featherAlpha(idata, feather);
       tctx.putImageData(idata, 0, 0);
@@ -2688,24 +2582,23 @@ export const imageRemoveBg: ProcessFn = async ({ files, options }, onProgress) =
 
     // 叠加背景 + 智能压缩
     onProgress(baseProg + 0.88, `叠加背景并压缩 ${fi + 1}/${files.length}`);
-    const flat = flattenCutout(cutout, bgMode, customBgColor);
+    const flat = flattenCutout(cutout!, bgMode, customBgColor);
     const { blob, ext } = await compressCutoutBlob(flat, bgMode, autoCompress ? 2400 : 99999);
     results.push({ name: `${stripExt(safeName(f.name))}_removebg.${ext}`, blob });
   }
 
-  const engineLabel = usedEngine === 'ai'
-    ? `U2NetP Portrait INT8 量化蒸馏 ONNX · 推理引擎 ${getLastEp() || 'Web'}`
-    : usedEngine === 'legacy'
-      ? `Flood Fill 容差法（AI 降级兜底，原因：${engineError || '用户关闭'}）`
-      : `混合模式（部分 AI、部分降级，${engineError || ''}）`;
+  const count = Math.max(1, files.length);
+  const avgMs = Math.round(elapsedSumMs / count);
+  const minMs = Number.isFinite(minElapsedMs) ? Math.round(minElapsedMs) : avgMs;
+  const maxMs = Math.round(maxElapsedMs || avgMs);
 
   const stats: Record<string, any> = {
-    算法: engineLabel,
-    模型缓存: 'IndexedDB 本地永久缓存（首次下载约 4.3MB / INT8≈1.2MB，秒级启动）',
-    速度指标: '常规图 300–800ms（WebGPU/WebGL；WASM 下 ≤1.2s），会话复用后每张速度稳定，不会越跑越慢',
+    算法: `Canvas Pixel · 纯 Canvas 像素抠图（引擎：${getLastEp() || 'canvas-2d'}）${engineError ? `（异常容错：${engineError}）` : ''}`,
+    速度指标: `单张处理耗时 · 平均 ${avgMs}ms / 最快 ${minMs}ms / 最慢 ${maxMs}ms；大图自动限制到最长边 1600 内部处理，每 32 行分片 yield 事件循环，页面绝不卡死`,
     输出背景: bgIsTransparent ? '透明 PNG' : bgMode === 'white' ? '白色背景（默认）' : `自定义纯色 ${customBgColor}`,
-    自动压缩: autoCompress ? `已启用（最长边 ≤ 2400px，按背景模式择优 JPG/PNG/WebP）` : '关闭',
-    输出策略: results.length === 1 ? '单张 → 直接输出原图文件下载' : `${results.length} 张 → 打包 ZIP 下载`,
+    自动压缩: autoCompress ? `已启用（最长边 ≤ 2400px，按背景模式择优 PNG/JPG/WebP）` : '关闭',
+    输出策略: results.length === 1 ? '单张 → 直接输出原图文件下载（PNG/WebP/JPG）' : `${results.length} 张 → 打包 ZIP 下载`,
+    稳定性: '零 AI / 零 ONNX / 零 WebGPU / 零 WASM 依赖 · 不下载任何模型 · 纯前端像素处理 · 零分钟级卡顿风险',
   };
 
   return packImages(results, 'png', 'MendFile_抠图结果', (r, m) => onProgress(0.9 + r * 0.09, m || '打包中'))

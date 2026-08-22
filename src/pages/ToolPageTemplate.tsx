@@ -151,7 +151,23 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
   const [thumbs, setThumbs] = useState<Record<number, string>>({});
   const [pageInfo, setPageInfo] = useState<Record<number, number>>({}); // 文件索引 -> 页数
   const [errors, setErrors] = useState<string[]>([]);
-  const [options, setOptions] = useState<any>(() => structuredCloneSafe(config.defaultOptions));
+  const [options, setOptions] = useState<any>(() => {
+    const defaults = structuredCloneSafe(config.defaultOptions);
+    // 抠图工具：从 localStorage 恢复上次背景选择
+    if (toolKey === 'image-removebg') {
+      try {
+        const savedBg = localStorage.getItem('mendfile_removebg_bgmode');
+        const savedColor = localStorage.getItem('mendfile_removebg_customcolor');
+        const savedThr = localStorage.getItem('mendfile_removebg_threshold');
+        const savedFeather = localStorage.getItem('mendfile_removebg_feather');
+        if (savedBg) defaults.bgMode = savedBg;
+        if (savedColor) defaults.customBgColor = savedColor;
+        if (savedThr) defaults.threshold = Number(savedThr);
+        if (savedFeather) defaults.feather = Number(savedFeather);
+      } catch { /* localStorage 不可用时静默 */ }
+    }
+    return defaults;
+  });
   const [extras, setExtras] = useState<any>({});
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -169,6 +185,18 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files.length]);
+
+  // 抠图工具：自动缓存用户背景选择到 localStorage
+  useEffect(() => {
+    if (toolKey !== 'image-removebg' || !options) return;
+    try {
+      if (options.bgMode) localStorage.setItem('mendfile_removebg_bgmode', options.bgMode);
+      if (options.customBgColor) localStorage.setItem('mendfile_removebg_customcolor', options.customBgColor);
+      if (options.threshold != null) localStorage.setItem('mendfile_removebg_threshold', String(options.threshold));
+      if (options.feather != null) localStorage.setItem('mendfile_removebg_feather', String(options.feather));
+    } catch { /* 静默 */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toolKey, options?.bgMode, options?.customBgColor, options?.threshold, options?.feather]);
 
   const onFilesChosen = (fl: FileList | File[]) => {
     const arr = Array.from(fl).filter((f) => f && f.size > 0);
@@ -1527,26 +1555,27 @@ function OptionsPanel(props: {
     'image-removebg': (
       <div className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Field label={`容差阈值 ${options.threshold ?? 28} / 255`} hint={'越大越「狠」（抠除越多）可能误扣主体；越小越保守可能残留白边'}>
-            <input type="range" min={0} max={200} step={1}
-              value={options.threshold ?? 28}
+          <Field label={`容差阈值 ${options.threshold ?? 35} / 120`} hint={'越大抠除越多可能误扣主体；越小越保守可能残留背景边。建议 25~50'}>
+            <input type="range" min={10} max={120} step={1}
+              value={options.threshold ?? 35}
               disabled={disabled}
               onChange={(e) => update({ threshold: Number(e.target.value) })} />
           </Field>
           <Field label={`边缘羽化 ${options.feather ?? 2} px`} hint="羽化越大边缘越柔和但可能略模糊；建议 1~4px">
-            <input type="range" min={0} max={10} step={1}
+            <input type="range" min={0} max={15} step={1}
               value={options.feather ?? 2}
               disabled={disabled}
               onChange={(e) => update({ feather: Number(e.target.value) })} />
           </Field>
-          <Field label="输出背景">
-            <select className="input" disabled={disabled} value={options.outputMode || 'transparent'}
-              onChange={(e) => update({ outputMode: e.target.value })}>
-              <option value="transparent">透明背景 PNG（推荐）</option>
-              <option value="custom-color">自定义纯色背景</option>
+          <Field label="输出背景" hint="默认白底，选择会自动缓存">
+            <select className="input" disabled={disabled} value={options.bgMode || 'white'}
+              onChange={(e) => update({ bgMode: e.target.value })}>
+              <option value="white">⚪ 白色背景（默认）</option>
+              <option value="transparent">🔍 透明背景 PNG</option>
+              <option value="custom">🎨 自定义纯色</option>
             </select>
           </Field>
-          {options.outputMode === 'custom-color' && (
+          {options.bgMode === 'custom' && (
             <Field label="自定义背景色">
               <div className="flex items-center gap-2 h-10">
                 <input type="color" className="h-10 w-14 rounded-lg border border-slate-200 bg-white cursor-pointer"
@@ -1562,23 +1591,31 @@ function OptionsPanel(props: {
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Field label="输出格式">
-            <select className="input" disabled={disabled} value={options.outputFormat || 'png'}
-              onChange={(e) => update({ outputFormat: e.target.value })}>
-              <option value="png">PNG（必须，支持透明）</option>
-              <option value="jpg">JPG（强制白底或自定义色底）</option>
-            </select>
+          <Field label="边缘精修" hint="自动消除前景中的孤立噪点">
+            <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded"
+                checked={options.edgeRefine !== false}
+                disabled={disabled}
+                onChange={(e) => update({ edgeRefine: e.target.checked })} />
+              <span>启用边缘精修 + 形态学清理</span>
+            </label>
           </Field>
-          <Field label={`输出质量 ${options.quality ?? 92}%`} hint="仅 JPG 生效">
-            <input type="range" min={40} max={100} step={1}
-              value={options.quality ?? 92}
-              disabled={disabled}
-              onChange={(e) => update({ quality: Number(e.target.value) })} />
+          <Field label="自动压缩" hint="限制最长边 2400px + 智能择优格式">
+            <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded"
+                checked={options.autoCompress !== false}
+                disabled={disabled}
+                onChange={(e) => update({ autoCompress: e.target.checked })} />
+              <span>启用自动无损轻量化压缩</span>
+            </label>
           </Field>
+        </div>
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600 leading-5">
+          ℹ️ <strong>下载逻辑</strong>：单张图片抠图完成直接输出 PNG 图片文件下载；仅当上传多张图片（批量抠图）时才打包 ZIP 压缩包。背景选择已自动缓存，下次进入自动复用。
         </div>
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 leading-5">
           <p className="font-semibold mb-1">⚠️ 【合规提示 · 必看】本工具不是神经网络 AI 抠图</p>
-          <p>仅基于纯 Canvas Flood Fill 颜色容差法 + 边缘羽化，效果远不如专业商用云端抠图服务。</p>
+          <p>采用高精度纯 Canvas Flood Fill 颜色容差法 + 边缘精修 + 形态学清理，效果远不如专业商用云端抠图服务。</p>
           <ul className="mt-1.5 space-y-0.5 list-disc list-inside text-red-700/90">
             <li>✅ 仅适合：<strong>纯色墙面背景人像 / 白底产品图 / 轻度渐变色背景</strong></li>
             <li>❌ 不适合：发丝、婚纱、半透明玻璃、高反光、复杂图案背景、前景与背景颜色相近</li>

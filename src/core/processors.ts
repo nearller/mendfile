@@ -2503,120 +2503,189 @@ export const imageEdit: ProcessFn = async ({ files, options }, onProgress) => {
     .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
 };
 
-/* ============ 3.5 前端轻量 AI 抠图（Flood Fill 容差法 + 羽化）============ */
+/* ============ 3.5 前端轻量 AI 抠图（高精度全边界 Flood Fill + 边缘精修 + 自动压缩）============ */
 export const imageRemoveBg: ProcessFn = async ({ files, options }, onProgress) => {
   onProgress(0.02, '准备处理');
-  const threshold = Math.max(0, Math.min(255, Number(options.threshold ?? 28)));
-  const feather = Math.max(0, Math.min(10, Number(options.feather ?? 2)));
-  const outputMode: string = options.outputMode || 'transparent'; // transparent | custom-color
+  const threshold = Math.max(10, Math.min(120, Number(options.threshold ?? 35)));
+  const feather = Math.max(0, Math.min(15, Number(options.feather ?? 2)));
+  const bgMode: string = options.bgMode || 'white'; // transparent | white | custom
   const customBgColor: string = options.customBgColor || '#ffffff';
-  const outFmt: string = options.outputFormat || 'png';
-  const quality = Math.max(0.1, Math.min(1, Number(options.quality ?? 0.92)));
+  const edgeRefine: boolean = options.edgeRefine !== false;
+  const autoCompress: boolean = options.autoCompress !== false;
+
+  const bgIsTransparent = bgMode === 'transparent';
+  const bgFill = bgMode === 'custom' ? customBgColor : '#ffffff';
+  const bgRgb = hexToRgb(bgFill);
 
   const results: { name: string; blob: Blob }[] = [];
+  const MAX_LONG = autoCompress ? 2400 : 9999;
+  const thrSq = threshold * threshold;
+  const edgeBand = Math.max(15, threshold * 0.6);
+  const softMax = threshold + edgeBand;
+
   for (let fi = 0; fi < files.length; fi++) {
     const f = files[fi];
-    onProgress(0.05 + (fi / files.length) * 0.8, `正在抠图 ${fi + 1}/${files.length}：${f.name}`);
+    onProgress(0.05 + (fi / files.length) * 0.75, `正在抠图 ${fi + 1}/${files.length}：${f.name}`);
     const dataUrl = await readAsDataURL(f);
     const img = await loadImage(dataUrl);
-    const base = drawScaled(img);
-    const W = base.width, H = base.height;
-    const ctx = base.getContext('2d')!;
-    const imgData = ctx.getImageData(0, 0, W, H);
-    const d = imgData.data;
 
-    // 取 4 角 + 4 边中点共 8 个采样点的平均颜色为背景色
-    const samples = [
-      [0, 0], [W - 1, 0], [0, H - 1], [W - 1, H - 1],
-      [Math.floor(W / 2), 0], [Math.floor(W / 2), H - 1],
-      [0, Math.floor(H / 2)], [W - 1, Math.floor(H / 2)],
-    ];
-    let br = 0, bg = 0, bb = 0;
-    samples.forEach(([x, y]) => {
-      const i = (y * W + x) * 4;
-      br += d[i]; bg += d[i + 1]; bb += d[i + 2];
-    });
-    br = Math.round(br / samples.length);
-    bg = Math.round(bg / samples.length);
-    bb = Math.round(bb / samples.length);
-
-    // Flood Fill 从 8 个种子点开始，所有与背景色相近的像素 alpha 置 0
-    // 为了兼顾性能和覆盖，先用「逐像素扫描 + 4 邻域扩散 BFS」近似（通过双 pass）
-    const visited = new Uint8Array(W * H);
-    const queue: number[] = [];
-    const pushPixel = (idx: number) => {
-      if (visited[idx]) return;
-      const i = idx * 4;
-      const dr = d[i] - br, dg = d[i + 1] - bg, db = d[i + 2] - bb;
-      if (Math.sqrt(dr * dr + dg * dg + db * db) <= threshold) {
-        visited[idx] = 1;
-        queue.push(idx);
-      }
-    };
-    samples.forEach(([x, y]) => pushPixel(y * W + x));
-    while (queue.length) {
-      const idx = queue.pop()!;
-      const x = idx % W;
-      const y = Math.floor(idx / W);
-      if (x > 0) pushPixel(idx - 1);
-      if (x < W - 1) pushPixel(idx + 1);
-      if (y > 0) pushPixel(idx - W);
-      if (y < H - 1) pushPixel(idx + W);
+    // 限制最大尺寸（自动压缩 + 防卡顿）
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if (Math.max(w, h) > MAX_LONG) {
+      const scale = MAX_LONG / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
     }
 
-    // 第一次 pass：visited 为 1 的像素背景候选 → 再做一次宽松的边缘判定
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const idx = y * W + x;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(img, 0, 0, w, h);
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const d = imgData.data;
+    const total = w * h;
+
+    // === Step 1: 采样全部边界像素，计算背景色均值 ===
+    let br = 0, bg = 0, bb = 0, count = 0;
+    for (let x = 0; x < w; x++) {
+      let i = x * 4; br += d[i]; bg += d[i + 1]; bb += d[i + 2]; count++;
+      i = ((h - 1) * w + x) * 4; br += d[i]; bg += d[i + 1]; bb += d[i + 2]; count++;
+    }
+    for (let y = 1; y < h - 1; y++) {
+      let i = y * w * 4; br += d[i]; bg += d[i + 1]; bb += d[i + 2]; count++;
+      i = (y * w + w - 1) * 4; br += d[i]; bg += d[i + 1]; bb += d[i + 2]; count++;
+    }
+    br = Math.round(br / count);
+    bg = Math.round(bg / count);
+    bb = Math.round(bb / count);
+
+    // === Step 2: 从全部边界像素 Flood Fill（Int32Array 栈，高性能）===
+    const visited = new Uint8Array(total);
+    const stack = new Int32Array(total);
+    let sp = 0;
+
+    const isBg = (idx: number) => {
+      const i = idx * 4;
+      const dr = d[i] - br, dg = d[i + 1] - bg, db = d[i + 2] - bb;
+      return dr * dr + dg * dg + db * db <= thrSq;
+    };
+
+    // 从全部边界像素入栈
+    for (let x = 0; x < w; x++) {
+      let idx = x;
+      if (!visited[idx] && isBg(idx)) { visited[idx] = 1; stack[sp++] = idx; }
+      idx = (h - 1) * w + x;
+      if (!visited[idx] && isBg(idx)) { visited[idx] = 1; stack[sp++] = idx; }
+    }
+    for (let y = 1; y < h - 1; y++) {
+      let idx = y * w;
+      if (!visited[idx] && isBg(idx)) { visited[idx] = 1; stack[sp++] = idx; }
+      idx = y * w + w - 1;
+      if (!visited[idx] && isBg(idx)) { visited[idx] = 1; stack[sp++] = idx; }
+    }
+
+    // BFS 扩散
+    while (sp > 0) {
+      const idx = stack[--sp];
+      const x = idx % w;
+      const y = (idx / w) | 0;
+      if (x > 0) { const ni = idx - 1; if (!visited[ni] && isBg(ni)) { visited[ni] = 1; stack[sp++] = ni; } }
+      if (x < w - 1) { const ni = idx + 1; if (!visited[ni] && isBg(ni)) { visited[ni] = 1; stack[sp++] = ni; } }
+      if (y > 0) { const ni = idx - w; if (!visited[ni] && isBg(ni)) { visited[ni] = 1; stack[sp++] = ni; } }
+      if (y < h - 1) { const ni = idx + w; if (!visited[ni] && isBg(ni)) { visited[ni] = 1; stack[sp++] = ni; } }
+    }
+
+    // === Step 3: 边缘精修 — 软 Alpha 过渡 ===
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x;
         const i = idx * 4;
         if (visited[idx]) {
           d[i + 3] = 0;
         } else {
-          // 二次判定：如果未 visited，但与背景色差在 threshold*1.1 内且相邻 visited，则也作为半透明边缘
-          const dr = d[i] - br, dg = d[i + 1] - bg, db = d[i + 2] - bb;
-          const diff = Math.sqrt(dr * dr + dg * dg + db * db);
-          const nearBg = (x > 0 && visited[idx - 1]) || (x < W - 1 && visited[idx + 1])
-            || (y > 0 && visited[idx - W]) || (y < H - 1 && visited[idx + W]);
-          if (nearBg && diff <= threshold + 30) {
-            const k = Math.max(0, (diff - threshold) / 30);
-            d[i + 3] = Math.round(d[i + 3] * k);
+          const adjBg = (x > 0 && visited[idx - 1]) || (x < w - 1 && visited[idx + 1])
+            || (y > 0 && visited[idx - w]) || (y < h - 1 && visited[idx + w]);
+          if (adjBg) {
+            const dr = d[i] - br, dg = d[i + 1] - bg, db = d[i + 2] - bb;
+            const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+            if (dist <= softMax) {
+              const k = (dist - threshold) / edgeBand;
+              d[i + 3] = Math.round(255 * Math.max(0, Math.min(1, k)));
+            }
           }
         }
       }
     }
 
-    // 羽化（alpha 平滑）
+    // === Step 4: 形态学清理 — 去除前景中的孤立噪点 ===
+    if (edgeRefine) {
+      const toRemove = new Uint8Array(total);
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const idx = y * w + x;
+          if (!visited[idx] && d[idx * 4 + 3] > 0) {
+            let bgNeighbors = 0;
+            if (visited[idx - 1] || d[(idx - 1) * 4 + 3] === 0) bgNeighbors++;
+            if (visited[idx + 1] || d[(idx + 1) * 4 + 3] === 0) bgNeighbors++;
+            if (visited[idx - w] || d[(idx - w) * 4 + 3] === 0) bgNeighbors++;
+            if (visited[idx + w] || d[(idx + w) * 4 + 3] === 0) bgNeighbors++;
+            if (bgNeighbors >= 3) toRemove[idx] = 1;
+          }
+        }
+      }
+      for (let i = 0; i < total; i++) {
+        if (toRemove[i]) { d[i * 4 + 3] = 0; visited[i] = 1; }
+      }
+    }
+
+    // === Step 5: Alpha 羽化（平滑边缘）===
     if (feather > 0) {
       featherAlpha(imgData, feather);
     }
 
     ctx.putImageData(imgData, 0, 0);
 
-    // 叠加自定义背景色（若输出模式为 custom-color 或输出为 JPG）
-    const needFlat = outputMode === 'custom-color' || outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'bmp';
-    const finalCanvas = document.createElement('canvas');
-    finalCanvas.width = W; finalCanvas.height = H;
-    const fctx = finalCanvas.getContext('2d')!;
-    if (needFlat) {
-      fctx.fillStyle = outputMode === 'custom-color' ? customBgColor : '#ffffff';
-      fctx.fillRect(0, 0, W, H);
+    // === Step 6: 合成背景 ===
+    let outCanvas: HTMLCanvasElement;
+    if (bgIsTransparent) {
+      outCanvas = canvas;
+    } else {
+      outCanvas = document.createElement('canvas');
+      outCanvas.width = w; outCanvas.height = h;
+      const octx = outCanvas.getContext('2d')!;
+      octx.fillStyle = `rgb(${bgRgb.r},${bgRgb.g},${bgRgb.b})`;
+      octx.fillRect(0, 0, w, h);
+      octx.drawImage(canvas, 0, 0);
     }
-    fctx.drawImage(base, 0, 0);
 
-    const mime = fmtToMime(outFmt);
-    const q = (outFmt === 'jpg' || outFmt === 'jpeg' || outFmt === 'webp') ? quality : undefined;
-    const blob = await canvasToBlob(finalCanvas, mime, q ?? 0.92);
-    results.push({ name: `${stripExt(safeName(f.name))}_removebg.${fmtToExt(outFmt)}`, blob });
+    // === Step 7: 输出 + 自动压缩（智能择优格式）===
+    let blob = await canvasToBlob(outCanvas, 'image/png', 0.92);
+    let ext = 'png';
+
+    if (autoCompress && blob.size > 1.5 * 1024 * 1024) {
+      if (bgIsTransparent) {
+        // 透明图：尝试 WebP 无损
+        const webpBlob = await canvasToBlob(outCanvas, 'image/webp', 1.0);
+        if (webpBlob.size < blob.size * 0.7) { blob = webpBlob; ext = 'webp'; }
+      } else {
+        // 实色背景：尝试 JPEG 高质量
+        const jpgBlob = await canvasToBlob(outCanvas, 'image/jpeg', 0.92);
+        if (jpgBlob.size < blob.size * 0.6) { blob = jpgBlob; ext = 'jpg'; }
+      }
+    }
+
+    results.push({ name: `${stripExt(safeName(f.name))}_removebg.${ext}`, blob });
   }
 
   const stats: Record<string, any> = {
-    算法: '纯 Canvas Flood Fill 颜色容差法（非神经网络）',
-    容差阈值: `${threshold} / 255`,
+    算法: '高精度全边界 Flood Fill + 边缘精修 + 形态学清理（非神经网络）',
+    容差阈值: `${threshold} / 120`,
     边缘羽化: `${feather} px`,
-    输出背景: outputMode === 'transparent' ? '透明 PNG' : `自定义纯色 ${customBgColor}`,
-    输出格式: outFmt.toUpperCase(),
+    输出背景: bgIsTransparent ? '透明 PNG' : bgMode === 'white' ? '白色背景' : `自定义纯色 ${customBgColor}`,
+    自动压缩: autoCompress ? `已启用（最长边 ≤ ${MAX_LONG}px，智能择优 PNG/WebP/JPEG）` : '关闭',
   };
-  return packImages(results, 'zip', 'MendFile_抠图结果', (r, m) => onProgress(0.85 + r * 0.12, m || '打包中'))
+
+  return packImages(results, 'png', 'MendFile_抠图结果', (r, m) => onProgress(0.85 + r * 0.12, m || '打包中'))
     .then((out) => ({ ...out, preview: { stats: { ...(out.preview?.stats || {}), ...stats } } }));
 };
 

@@ -795,37 +795,39 @@ export const TOOLS_CONFIG: Record<string, ToolConfig> = {
     key: 'image-removebg',
     path: '/tools/image-removebg',
     name: '前端轻量 AI 抠图工具',
-    shortDesc: '纯 Canvas 颜色容差法一键替换背景为透明/纯色，支持羽化边缘（合规标注：非真实神经网络 AI 抠图）',
+    shortDesc: '高精度颜色容差法一键抠除背景，支持白底/透明/自定义纯色，边缘精修+自动压缩（合规标注：非真实神经网络 AI 抠图）',
     category: 'image',
     icon: '🪄',
     title: 'AI 抠图工具 去背景变透明 - MendFile 全能办公工具（合规标注：纯Canvas容差法非神经网络）',
-    description: 'MendFile 免费在线前端轻量抠图工具，纯前端本地处理，采用纯 Canvas Flood Fill 颜色容差算法一键抠除纯色/纯色+轻度渐变背景，可调容差与羽化。⚠️ 【合规提示】本工具并非基于深度学习或神经网络的 AI 抠图，不调用任何云端抠图模型，不适合复杂背景、发丝、婚纱、玻璃、高反光等场景。',
-    keywords: ['在线AI抠图', '去背景变透明', '纯色背景抠图', '证件照换底备用', '透明PNG生成', '前端抠图'],
+    description: 'MendFile 免费在线前端轻量抠图工具，纯前端本地处理，采用高精度 Flood Fill 颜色容差算法从全边界采样背景色，配合边缘精修与形态学清理一键抠除纯色/轻度渐变背景。默认输出白底背景，可切换透明或自定义纯色，抠图后自动无损压缩。单张直接下载 PNG，批量打包 ZIP。⚠️ 【合规提示】本工具并非基于深度学习或神经网络的 AI 抠图，不调用任何云端模型。',
+    keywords: ['在线AI抠图', '去背景变透明', '纯色背景抠图', '白底图变透明', '证件照换底备用', '透明PNG生成', '前端抠图', '批量抠图'],
     features: [
-      '一键 Flood Fill 颜色容差抠图：自动从 4 角 + 4 边选取背景色，按容差阈值移除',
-      '可调容差阈值（0~255）与边缘羽化（0~10px），获得柔和不扎眼的边缘',
-      '可选输出透明 PNG、或叠加自定义背景色输出 JPG',
-      '批量多图处理，全部在浏览器内计算，不调用任何云端模型、不上传文件',
+      '高精度全边界 Flood Fill 抠图：从全部边界像素采样背景色，Int32Array 栈高速填充，覆盖完整',
+      '边缘精修 + 形态学清理：软 Alpha 过渡 + 孤立噪点自动消除，边缘干净不扎眼',
+      '可调容差（10~120）与羽化（0~15px），默认白底，支持透明 / 自定义纯色背景一键切换',
+      '抠图后自动无损压缩：智能限制最长边 2400px + 格式自动择优（PNG/WebP/JPEG），大幅缩减体积',
+      '单张直接下载 PNG，批量处理打包 ZIP；背景选择自动缓存，下次进入自动复用',
+      '全部在浏览器内计算，不调用任何云端模型、不上传文件',
     ],
     boundaries: [
-      '⚠️ 【核心合规提示】本工具不是基于深度学习 / 神经网络的 AI 抠图，仅使用纯 Canvas Flood Fill 颜色容差法，效果远不如专业付费云端抠图服务',
+      '⚠️ 【核心合规提示】本工具不是基于深度学习 / 神经网络的 AI 抠图，仅使用纯 Canvas 高精度颜色容差法，效果远不如专业付费云端抠图服务',
       '⚠️ 仅适合人像主体 + 纯色墙面 / 纯色 + 轻度渐变背景 / 白底产品图。发丝、婚纱、半透明、高反光、复杂图案背景、前景色与背景色接近等场景均会出现严重边缘残留或误扣',
       '⚠️ 身份证、护照、签证、考试报名、正式证件照等用途请务必使用专业照相馆或知名商用抠图服务，本工具不保证结果符合标准',
-      '⚠️ 纯前端本地处理，不存储、不上传用户任何图片数据，但大尺寸（≥ 4000 像素）图像可能占用较高内存，建议使用 2000 像素以内图像',
+      '⚠️ 纯前端本地处理，不存储、不上传用户任何图片数据；大尺寸图像自动缩放至 2400px 以内以保流畅',
       '⚠️ 本功能定位为"快速临时轻量抠图"，不承担任何因抠图质量不佳导致的业务损失',
     ],
     boundaryCardStyle: 'red',
     accept: 'image/*',
     multiple: true,
-    outputExt: 'zip',
+    outputExt: 'png',
     outputFileName: 'MendFile_抠图结果',
     defaultOptions: {
-      threshold: 28, // 0~255 颜色容差
-      feather: 2, // 0~10 像素边缘羽化
-      outputMode: 'transparent', // transparent | custom-color
+      threshold: 35, // 10~120 颜色容差
+      feather: 2, // 0~15 像素边缘羽化
+      bgMode: 'white', // transparent | white | custom
       customBgColor: '#ffffff',
-      outputFormat: 'png', // png | jpg
-      quality: 92,
+      edgeRefine: true, // 边缘精修
+      autoCompress: true, // 自动压缩
     },
     processor: P.imageRemoveBg,
     showPreview: true,

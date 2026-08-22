@@ -6,8 +6,8 @@ import { formatBytes, generatePdfThumbnail, readAsArrayBuffer, readAsDataURL, do
 import { pdfjsLib } from '@/core/pdfjs';
 import AdSlot from '@/components/AdSlot';
 import type { ProcessOutput } from '@/core/types';
-// 批次 6 · 云端增强模式提示条（仅架构预留）
-import { CloudModeHintStrip, CloudBannerEntry } from '@/components/CloudReserve';
+// 批次 6 · 云端增强内嵌开关（仅在"开始处理 / 一键下载"按钮旁提供，不在页面正文/横幅展示）
+import { CloudEnhanceSwitch } from '@/components/CloudReserve';
 // 批次 3 · AI 抠图实时预览
 import {
   removeBackground as aiRemoveBg,
@@ -373,13 +373,6 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
 
   return (
     <div className="space-y-6">
-      {/* 批次 6 · 云端增强模式提示（仅开关开启时显示；当前为架构预留，仍纯本地处理） */}
-      <CloudModeHintStrip />
-      {/* 工具页紧凑云端入口 + 工具信息右上小徽章 */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div />
-        <CloudBannerEntry compact />
-      </div>
       {/* 上传区（fileRequired=false 时隐藏，如工时计算、密码生成、单位换算等） */}
       {needFile && (
         <DropZone
@@ -513,7 +506,7 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
 
       {/* 操作按钮 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           <button
             className="btn-primary"
             disabled={running || (needFile && !files.length)}
@@ -531,12 +524,19 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
             )
           )}
         </div>
-        <div className="flex gap-2 items-center">
+        <CloudEnhanceSwitch />
+      </div>
+
+      {/* 下载按钮行：再次提供云端增强开关 + 提示（用户下载前确认） */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div />
+        <div className="flex flex-wrap gap-2 items-center">
           {needFile && (
             <div className="text-xs text-slate-500 hidden sm:inline">
               总大小：{formatBytes(files.reduce((s, f) => s + f.size, 0))}
             </div>
           )}
+          <CloudEnhanceSwitch />
           <button
             className="btn-primary !bg-emerald-600 hover:!bg-emerald-700"
             disabled={!output}

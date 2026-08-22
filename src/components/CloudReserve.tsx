@@ -326,3 +326,33 @@ function AuthCheck({
     </label>
   );
 }
+
+/**
+ * 内嵌式开关 —— 仅出现在「开始处理 / 一键下载」按钮旁，
+ * 不在页面正文/标题/描述/横幅等展示位置出现。
+ * 开关旁提示说明：本版本是架构预留，开启后仍纯本地处理，不会真的上传。
+ */
+export function CloudEnhanceSwitch({ align = 'right' }: { align?: 'left' | 'right' }) {
+  const { enabled, setEnabled } = useCloudMode();
+  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => setEnabled(e.target.checked);
+  return (
+    <label
+      className={`inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 transition whitespace-nowrap ${
+        align === 'right' ? 'justify-end' : ''
+      }`}
+      title="云端增强开关：仅在处理/下载前决定是否启用（当前为架构预留）"
+    >
+      <input
+        type="checkbox"
+        className="w-4 h-4 rounded accent-violet-600"
+        checked={enabled}
+        onChange={onChange}
+      />
+      <span className="font-medium text-slate-700">启用云端增强</span>
+      <span className="hidden sm:inline text-slate-500">
+        · 架构预留：当前仍在您浏览器<strong className="text-slate-600">本地处理</strong>，不会上传任何文件
+      </span>
+      <span className="inline sm:hidden text-slate-500">· 本地优先</span>
+    </label>
+  );
+}

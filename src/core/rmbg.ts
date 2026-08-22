@@ -509,11 +509,11 @@ export async function removeBackground(
     }
     const cutoutCanvas = composeCutout(rgbaFull, maskCanvas);
 
-    onProgress?.('compose', 1, `完成（纯 Canvas 像素算法 · ${Math.round(performance.now() - t0)} ms）`);
+    onProgress?.('compose', 1, `完成（${Math.round(performance.now() - t0)} ms）`);
     return {
       cutoutCanvas,
       maskCanvas,
-      engine: 'Canvas Pixel（纯 Canvas 像素抠图 · 稳定不卡死）',
+      engine: '本地浏览器处理',
       elapsedMs: performance.now() - t0,
     };
   } finally { clearTimeout(timer); }

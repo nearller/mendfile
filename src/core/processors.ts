@@ -2593,12 +2593,12 @@ export const imageRemoveBg: ProcessFn = async ({ files, options }, onProgress) =
   const maxMs = Math.round(maxElapsedMs || avgMs);
 
   const stats: Record<string, any> = {
-    算法: `Canvas Pixel · 纯 Canvas 像素抠图（引擎：${getLastEp() || 'canvas-2d'}）${engineError ? `（异常容错：${engineError}）` : ''}`,
-    速度指标: `单张处理耗时 · 平均 ${avgMs}ms / 最快 ${minMs}ms / 最慢 ${maxMs}ms；大图自动限制到最长边 1600 内部处理，每 32 行分片 yield 事件循环，页面绝不卡死`,
+    处理方式: `浏览器本地处理${engineError ? `（异常容错：${engineError}）` : ''}`,
+    处理速度: `平均 ${avgMs}ms / 最快 ${minMs}ms / 最慢 ${maxMs}ms；图片越大耗时会相应增加，整体流畅不卡顿`,
     输出背景: bgIsTransparent ? '透明 PNG' : bgMode === 'white' ? '白色背景（默认）' : `自定义纯色 ${customBgColor}`,
-    自动压缩: autoCompress ? `已启用（最长边 ≤ 2400px，按背景模式择优 PNG/JPG/WebP）` : '关闭',
-    输出策略: results.length === 1 ? '单张 → 直接输出原图文件下载（PNG/WebP/JPG）' : `${results.length} 张 → 打包 ZIP 下载`,
-    稳定性: '零 AI / 零 ONNX / 零 WebGPU / 零 WASM 依赖 · 不下载任何模型 · 纯前端像素处理 · 零分钟级卡顿风险',
+    自动压缩: autoCompress ? '已启用（按背景与尺寸智能优化 PNG/JPG/WebP，兼顾高清与小体积）' : '关闭',
+    输出方式: results.length === 1 ? '单张 → 直接下载成品' : `${results.length} 张 → 打包 ZIP 下载`,
+    稳定性: '打开即用，不下载任何模型，全程本地处理，不占用超高资源'
   };
 
   return packImages(results, 'png', 'MendFile_抠图结果', (r, m) => onProgress(0.9 + r * 0.09, m || '打包中'))

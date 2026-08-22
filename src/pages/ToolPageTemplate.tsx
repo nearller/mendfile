@@ -381,6 +381,9 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
           disabled={running}
           onFiles={onFilesChosen}
           inputRef={inputRef}
+          files={files}
+          thumbs={thumbs}
+          pageInfo={pageInfo}
         />
       )}
 
@@ -556,16 +559,20 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
 }
 
 function DropZone({
-  accept, multiple, disabled, onFiles, inputRef,
+  accept, multiple, disabled, onFiles, inputRef, files, thumbs, pageInfo,
 }: {
   accept: string; multiple: boolean; disabled: boolean;
   onFiles: (f: FileList | File[]) => void;
   inputRef: React.MutableRefObject<HTMLInputElement | null>;
+  files: File[];
+  thumbs: Record<number, string>;
+  pageInfo?: Record<number, number>;
 }) {
   const [over, setOver] = useState(false);
+  const hasFiles = files && files.length > 0;
   return (
     <label
-      className={`block border-2 border-dashed rounded-2xl p-6 sm:p-10 text-center transition cursor-pointer ${over ? 'dropzone-active' : 'border-slate-200 hover:border-brand-400 hover:bg-slate-50/50'}`}
+      className={`block border-2 border-dashed rounded-2xl transition cursor-pointer ${over ? 'dropzone-active' : 'border-slate-200 hover:border-brand-400 hover:bg-slate-50/50'} ${hasFiles ? 'p-4 sm:p-5' : 'p-6 sm:p-10 text-center'}`}
       onDragOver={(e) => {
         e.preventDefault();
         if (!disabled) setOver(true);
@@ -590,16 +597,66 @@ function DropZone({
           e.target.value = '';
         }}
       />
-      <div className="mx-auto h-14 w-14 rounded-full bg-brand-50 text-brand-600 grid place-items-center text-2xl">
-        ☁️
-      </div>
-      <div className="mt-4 font-semibold text-slate-800">
-        {multiple ? '拖拽文件到此处，或点击选择多个文件' : '拖拽文件到此处，或点击选择文件'}
-      </div>
-      <div className="mt-1 text-xs text-slate-500">
-        支持格式：<code className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{accept || '全部'}</code>
-        {' · '}全程本地处理，文件不上传服务器
-      </div>
+      {!hasFiles ? (
+        /* 未选择文件时：居中展示原提示 */
+        <>
+          <div className="mx-auto h-14 w-14 rounded-full bg-brand-50 text-brand-600 grid place-items-center text-2xl">
+            ☁️
+          </div>
+          <div className="mt-4 font-semibold text-slate-800">
+            {multiple ? '拖拽文件到此处，或点击选择多个文件' : '拖拽文件到此处，或点击选择文件'}
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            支持格式：<code className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{accept || '全部'}</code>
+            {' · '}全程本地处理，文件不上传服务器
+          </div>
+        </>
+      ) : (
+        /* 已选择文件时：左侧缩略图卷轴，右侧保留文案提示继续追加 */
+        <div className="flex flex-col sm:flex-row gap-4 items-stretch">
+          {/* 左侧：文件缩略图（横向卷轴，可左右滑动） */}
+          <div className="sm:w-1/2 lg:w-3/5 shrink-0">
+            <div className="text-xs text-slate-500 mb-2 flex items-center justify-between">
+              <span><strong className="text-slate-700">已选 {files.length}</strong> 个文件 · 总大小 {formatBytes(files.reduce((s, f) => s + f.size, 0))}</span>
+              <span className="hidden sm:inline text-slate-400">左右滑动查看全部 →</span>
+            </div>
+            <div className="flex gap-3 overflow-x-auto pb-2 pr-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {files.map((f, i) => (
+                <div key={`${f.name}-${i}`}
+                     className="shrink-0 w-24 sm:w-28 flex flex-col items-stretch text-slate-700">
+                  <div className="h-20 sm:h-24 w-full rounded-lg bg-white border border-slate-200 overflow-hidden grid place-items-center text-slate-400">
+                    {thumbs[i] ? (
+                      <img src={thumbs[i]} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="text-2xl">{fileIcon(f)}</span>
+                    )}
+                  </div>
+                  <div className="mt-1.5 text-[11px] leading-4 font-medium truncate text-slate-800" title={f.name}>{f.name}</div>
+                  <div className="text-[10px] text-slate-500 leading-4">
+                    {formatBytes(f.size)}
+                    {pageInfo?.[i] != null ? ` · ${pageInfo[i]}页` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* 右侧：保留拖拽/点击提示，方便继续追加文件 */}
+          <div className="flex-1 flex flex-col items-start sm:items-center justify-center gap-2 sm:py-3 py-1">
+            <div className="h-12 w-12 rounded-full bg-brand-50 text-brand-600 grid place-items-center text-xl shrink-0">
+              ➕
+            </div>
+            <div className="font-semibold text-slate-800 text-left sm:text-center">
+              {multiple ? '继续拖拽到此处，或点击添加更多文件' : '继续拖拽到此处，或点击替换文件'}
+            </div>
+            <div className="text-xs text-slate-500 text-left sm:text-center leading-5">
+              支持格式：<code className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{accept || '全部'}</code>
+              <br className="sm:hidden" />
+              <span className="hidden sm:inline"> · </span>
+              全程本地处理，<span className="text-slate-600">文件不上传服务器</span>
+            </div>
+          </div>
+        </div>
+      )}
     </label>
   );
 }
@@ -692,6 +749,10 @@ function OptionsPanel(props: {
   const { toolKey, options, setOptions, extras, setExtras, disabled } = props;
   const update = (patch: any) => setOptions((prev: any) => ({ ...prev, ...patch }));
   const updateExtras = (patch: any) => setExtras((prev: any) => ({ ...prev, ...patch }));
+  // 抠图工具：高级参数详情（容差/带宽/羽化/精修）默认折叠，点击「显示参数详情」展开
+  const [showRemoveBgAdv, setShowRemoveBgAdv] = useState(false);
+  // 抠图工具：合规提示（精简一行小字）默认折叠，「… 查看更多」展开
+  const [showRemoveBgBoundary, setShowRemoveBgBoundary] = useState(false);
 
   // 所有 pdf 相关带页码范围/选择的工具通用信息
   const pageTip = props.totalPages ? `当前文件共 ${props.totalPages} 页` : '';
@@ -1653,52 +1714,18 @@ function OptionsPanel(props: {
     ),
     'image-removebg': (
       <div className="space-y-4">
-        <div className="rounded-xl bg-gradient-to-r from-emerald-50 via-white to-sky-50 border border-emerald-200 p-3 sm:p-4 flex flex-wrap items-center gap-3 justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-500 to-sky-600 text-white grid place-items-center text-lg shadow-sm">🧪</div>
-            <div>
-              <div className="text-sm font-semibold text-slate-800">Canvas Pixel · 纯 Canvas 像素抠图（零模型 · 页面绝不卡死）</div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                零 AI / 零 ONNX / 零 WebGPU / 零 WASM 依赖 · 不下载任何模型 · 四角+四边+边带采样 · 颜色距离 + Flood Fill + 边缘精修 · 常规图 200–600ms · 每 32 行分片 yield 事件循环，绝对不卡死
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="inline-flex items-center gap-2 text-xs bg-white border border-emerald-200 rounded-lg px-3 py-2 text-emerald-800">
-              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="font-medium">打开即用 · 无需加载</span>
-            </span>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Field label={`容差阈值 ${options.threshold ?? 35}`} hint={'越大抠除越多（推荐 25–45），适用于所有模式'}>
-            <input type="range" min={8} max={160} step={1}
-              value={options.threshold ?? 35}
-              disabled={disabled}
-              onChange={(e) => update({ threshold: Number(e.target.value) })} />
-          </Field>
-          <Field label={`软过渡带宽 ${options.softBand ?? 18}`} hint="越大边缘越柔和；渐变/复杂背景建议调大（18~50）">
-            <input type="range" min={6} max={160} step={1}
-              value={options.softBand ?? 18}
-              disabled={disabled}
-              onChange={(e) => update({ softBand: Number(e.target.value) })} />
-          </Field>
-          <Field label={`边缘羽化 ${Number(options.feather ?? 1.2).toFixed(1)} px`} hint="羽化越大边缘越柔和但可能略模糊，建议 0.5–3px">
-            <input type="range" min={0} max={15} step={0.1}
-              value={options.feather ?? 1.2}
-              disabled={disabled}
-              onChange={(e) => update({ feather: Number(e.target.value) })} />
-          </Field>
-          <Field label="输出背景" hint="默认白底，选择会自动缓存，下次进入自动复用">
+        {/* 常用参数：默认展开（输出背景 + 自动压缩） */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <Field label="输出背景" hint="白底 / 透明 / 自定义颜色，预览区同步渲染">
             <select className="input" disabled={disabled} value={options.bgMode || 'white'}
               onChange={(e) => update({ bgMode: e.target.value })}>
-              <option value="white">⚪ 白色背景（默认 · 预览区同步渲染）</option>
+              <option value="white">⚪ 白色背景（默认）</option>
               <option value="transparent">🔍 透明背景 PNG</option>
               <option value="custom">🎨 自定义纯色</option>
             </select>
           </Field>
-          {options.bgMode === 'custom' ? (
-            <Field label="自定义背景色" hint="修改颜色预览图会立即重绘，所见即所得">
+          {options.bgMode === 'custom' && (
+            <Field label="自定义背景色" hint="修改颜色预览图会立即重绘">
               <div className="flex items-center gap-2 h-10">
                 <input type="color" className="h-10 w-14 rounded-lg border border-slate-200 bg-white cursor-pointer"
                   value={options.customBgColor || '#ffffff'}
@@ -1710,50 +1737,85 @@ function OptionsPanel(props: {
                   onChange={(e) => update({ customBgColor: e.target.value })} />
               </div>
             </Field>
-          ) : (
-            <Field label="边缘精修" hint="去除孤立噪点 + 灰边清理 + 边缘压边">
-              <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
-                <input type="checkbox" className="w-4 h-4 rounded"
-                  checked={options.edgeRefine !== false}
-                  disabled={disabled}
-                  onChange={(e) => update({ edgeRefine: e.target.checked })} />
-                <span>启用精修（强烈推荐开启）</span>
-              </label>
-            </Field>
           )}
-          <Field label="自动压缩" hint="最长边 ≤2400px + 按背景择优 PNG/JPG/WebP 格式">
+          <Field label="自动压缩" hint="最长边 ≤2400px，按背景择优 PNG/JPG/WebP 格式">
             <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
               <input type="checkbox" className="w-4 h-4 rounded"
                 checked={options.autoCompress !== false}
                 disabled={disabled}
                 onChange={(e) => update({ autoCompress: e.target.checked })} />
-              <span>启用智能轻量化压缩（高清 + 小体积）</span>
+              <span>启用智能轻量化压缩</span>
             </label>
           </Field>
-          {options.bgMode === 'custom' && (
-            <Field label="边缘精修" hint="去除孤立噪点 + 灰边清理 + 边缘压边">
-              <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
-                <input type="checkbox" className="w-4 h-4 rounded"
-                  checked={options.edgeRefine !== false}
+        </div>
+
+        {/* 高级参数：默认折叠，用户点展开才看到容差/软过渡/羽化/精修 */}
+        <div className="border border-slate-200/80 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-slate-50/70 hover:bg-slate-50 text-sm text-slate-700"
+            onClick={() => setShowRemoveBgAdv((v) => !v)}
+          >
+            <span className="inline-flex items-center gap-2">
+              <span>🔬 参数详情（高级）</span>
+              <span className="text-[11px] text-slate-500 font-normal">
+                {showRemoveBgAdv ? '已展开：容差阈值 / 软过渡带宽 / 羽化 / 边缘精修' : '一般用户无需调节，默认值已适配大多数场景'}
+              </span>
+            </span>
+            <span className={`transition-transform ${showRemoveBgAdv ? 'rotate-180' : ''}`}>▾</span>
+          </button>
+          {showRemoveBgAdv && (
+            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-100 bg-white/60">
+              <Field label={`容差阈值 ${options.threshold ?? 35}`} hint="越大抠除越多（推荐 25–45）">
+                <input type="range" min={8} max={160} step={1}
+                  value={options.threshold ?? 35}
                   disabled={disabled}
-                  onChange={(e) => update({ edgeRefine: e.target.checked })} />
-                <span>启用精修（强烈推荐开启）</span>
-              </label>
-            </Field>
+                  onChange={(e) => update({ threshold: Number(e.target.value) })} />
+              </Field>
+              <Field label={`软过渡带宽 ${options.softBand ?? 18}`} hint="越大边缘越柔和；渐变/复杂背景建议调大（18~50）">
+                <input type="range" min={6} max={160} step={1}
+                  value={options.softBand ?? 18}
+                  disabled={disabled}
+                  onChange={(e) => update({ softBand: Number(e.target.value) })} />
+              </Field>
+              <Field label={`边缘羽化 ${Number(options.feather ?? 1.2).toFixed(1)} px`} hint="建议 0.5–3px">
+                <input type="range" min={0} max={15} step={0.1}
+                  value={options.feather ?? 1.2}
+                  disabled={disabled}
+                  onChange={(e) => update({ feather: Number(e.target.value) })} />
+              </Field>
+              <Field label="边缘精修" hint="去除孤立噪点 + 灰边清理 + 边缘压边">
+                <label className="inline-flex items-center gap-2 h-10 text-sm cursor-pointer">
+                  <input type="checkbox" className="w-4 h-4 rounded"
+                    checked={options.edgeRefine !== false}
+                    disabled={disabled}
+                    onChange={(e) => update({ edgeRefine: e.target.checked })} />
+                  <span>启用精修（推荐开启）</span>
+                </label>
+              </Field>
+            </div>
           )}
         </div>
-        <div className="bg-emerald-50/70 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-900 leading-5">
-          ℹ️ <strong>交互说明</strong>：<u>上传图片瞬间即自动抠图</u>，无需点击任何按钮；抠图完成后下方预览卡会自动显示，切换背景 / 颜色 / 容差会<strong>实时重绘最终效果图</strong>，点击「一键下载结果」即可获取 PNG（单张）或 ZIP（多张批量）。
-        </div>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 leading-5">
-          <p className="font-semibold mb-1">⚠️ 【合规边界 · 必看】效果上限说明</p>
-          <p>本工具采用纯 Canvas 像素算法（<strong>零 AI 模型、不下载任何东西、页面绝不卡死</strong>），通过「四角+四边中点+2%边带采样 → 背景颜色聚类 → 颜色距离+软过渡 → Flood Fill 收紧 → 边缘精修」流程稳定抠图，<strong>所有像素必改 alpha，杜绝「输出与原图一致」的无效抠图</strong>：</p>
-          <ul className="mt-1.5 space-y-0.5 list-disc list-inside text-red-700/90">
-            <li>✅ 擅长：<strong>白底证件照、电商白底图、人像纯色背景、普通商品 / 服装 / 一般静物、PPT / 海报 / 打印日常办公</strong></li>
-            <li>⚠️ 仍有难度：<strong>多层重叠遮挡 + 前景与背景颜色极接近、超低分辨率 / 严重模糊图像、精细半透明物体（薄纱 / 玻璃 / 烟雾 / 液态）、极其复杂混乱背景</strong>等可能存在边界误差</li>
-            <li>❌ 正式用途提醒：<strong>身份证、护照、签证、考试报名等合规证件照，请务必以专业照相馆或官方指定工具出图为准</strong></li>
-          </ul>
-          <p className="mt-1.5 text-red-700/80">建议先上传单张预览，必要时调大 / 调小「容差阈值」和「软过渡带宽」，确认效果满意后再批量处理；极端异常也会至少输出原图压缩结果，保证工具 100% 可用。</p>
+
+        {/* 合规提示（精简版，默认折叠一行小字） */}
+        <div className="rounded-lg p-3 bg-red-50/60 border border-red-200/70 text-xs text-red-800 leading-5">
+          <p>
+            <strong>⚠️ 合规提示：</strong>本工具纯本地运算，适合日常办公场景（白底证件照、电商图、人像纯色背景、PPT 海报等）；身份证 / 护照 / 签证 / 考试报名等合规证件照请以<strong>专业照相馆或官方指定工具</strong>出图为准。
+            <button
+              type="button"
+              className="ml-2 font-medium text-red-700 underline-offset-2 hover:underline"
+              onClick={() => setShowRemoveBgBoundary((v) => !v)}
+            >
+              {showRemoveBgBoundary ? '收起' : '…查看更多边界说明'}
+            </button>
+          </p>
+          {showRemoveBgBoundary && (
+            <ul className="mt-2 space-y-1 list-disc list-inside text-red-700/90">
+              <li>擅长：白底证件照、电商白底图、人像纯色背景、一般静物 / 服装 / 商品、PPT / 海报 / 打印等日常办公</li>
+              <li>边界：多层重叠遮挡 + 前景背景颜色极接近、超低分辨率 / 严重模糊、精细半透明物体（薄纱 / 玻璃 / 烟雾 / 液体）、极端混乱背景可能存在边界误差</li>
+              <li>建议：先上传单张预览，必要时在「参数详情」中调节「容差阈值 / 软过渡带宽」，确认效果满意后再批量处理</li>
+            </ul>
+          )}
         </div>
       </div>
     ),

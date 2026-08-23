@@ -7,3 +7,8 @@ dist-ssr
 .idea
 .vscode
 coverage
+# TypeScript incremental build artifacts（tsc -b 生成的编译缓存，不同机器/不同构建会变，禁止入库）
+*.tsbuildinfo
+# Vite 配置：统一走 vite.config.ts；ts 编译产生的对应 vite.config.js / vite.config.d.ts 不要入库
+vite.config.js
+vite.config.d.ts

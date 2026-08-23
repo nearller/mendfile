@@ -8,6 +8,8 @@ import AdSlot from '@/components/AdSlot';
 import type { ProcessOutput } from '@/core/types';
 // 批次 6 · 云端增强内嵌开关（仅在"开始处理 / 一键下载"按钮旁提供，不在页面正文/横幅展示）
 import { CloudEnhanceSwitch } from '@/components/CloudReserve';
+// 批次 · 在线设计：流程图 / 平面图 / 时序图（统一编辑器组件）
+import { DiagramDesigner, type DiagramToolPreset } from '@/components/DiagramDesigner';
 // 批次 3 · AI 抠图实时预览
 import {
   removeBackground as aiRemoveBg,
@@ -366,10 +368,27 @@ function ToolWorker({ toolKey, config }: { toolKey: string; config: ToolConfig }
 
   // 进度条百分比
   const pct = Math.min(100, Math.round(progress * 100));
-  const needFile = config.fileRequired !== false;
+  // 在线设计类工具：流程图 / 平面图 / 时序图 → 用独立的 DiagramDesigner 代替上传/参数/按钮/结果区
+  const DIAGRAM_TOOLS: Record<string, DiagramToolPreset> = {
+    'flowchart-designer': 'flowchart',
+    'floorplan-designer': 'floorplan',
+    'sequence-designer': 'sequence',
+  };
+  const isDiagram = !!DIAGRAM_TOOLS[toolKey];
+  const needFile = !isDiagram && config.fileRequired !== false;
   const startBtnLabel = needFile
     ? (running ? '处理中…' : `⚙️ 开始处理（输出 .${config.outputExt}）`)
     : (running ? '计算中…' : `✨ 开始生成 / 计算（输出 .${config.outputExt}）`);
+
+  if (isDiagram) {
+    return (
+      <DiagramDesigner
+        toolKey={toolKey}
+        toolName={config.name}
+        outputFileName={config.outputFileName}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">

@@ -3734,3 +3734,18 @@ export const unitConvert: ProcessFn = async ({ options }, onProgress) => {
   const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
   return { blob, fileName: 'MendFile_单位换算结果', ext: 'txt' };
 };
+
+// -----------------------------------------------------------------------------
+// 批次 · 在线设计器（流程图 / 平面图 / 时序图）
+// 实际导出逻辑由 <DiagramDesigner/> 组件内部（src/core/diagram.ts）直接处理：
+//   用户通过工具栏按钮 → 保存 JSON / 导入 JSON / 导出 PNG/JPG/PDF
+// processor 仅做占位（满足 ToolConfig.processor 必填字段；不用于真正业务流程）。
+// -----------------------------------------------------------------------------
+export const diagramNoop: ProcessFn = async (_input, onProgress) => {
+  onProgress(1, '设计类工具的导入/导出请使用画布上方工具栏按钮。');
+  const blob = new Blob(
+    ['MendFile 在线设计器：请在画布上方点击「保存 JSON / 导出 PNG / 导出 JPG / 导出 PDF」按钮。'],
+    { type: 'text/plain;charset=utf-8' },
+  );
+  return { blob, fileName: 'MendFile_设计类工具使用说明', ext: 'txt' };
+};

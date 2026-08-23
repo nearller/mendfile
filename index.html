@@ -11,6 +11,26 @@
     <meta name="MobileOptimized" content="width" />
     <meta name="HandheldFriendly" content="true" />
 
+    <!--
+      前端库兼容兜底（@excalidraw/excalidraw 的 CJS 入口会动态读取 process.env.XXX）。
+      Vite 构建 + vite.config.ts 的 define 会在编译期替换掉大部分 process.env 字面量；
+      这里再注入一个 window.process 对象，防止运行时仍然存在 process is not defined 的 ReferenceError。
+    -->
+    <script>
+      (function () {
+        if (typeof window !== 'undefined' && !window.process) {
+          window.process = {
+            env: {
+              NODE_ENV: document.location.hostname === 'localhost' || document.location.hostname === '127.0.0.1'
+                ? 'development'
+                : 'production',
+              IS_PREACT: 'false',
+            },
+          };
+        }
+      })();
+    </script>
+
     <title>MendFile 全能办公工具 - 免费在线PDF转换、合并、拆分、去水印 纯前端本地处理</title>
     <meta name="description" content="MendFile 全能办公工具是一款完全免费、无需登录、纯前端本地处理的在线办公平台，支持PDF转Word、PDF转图片、PDF合并拆分、PDF去水印、PDF加密解密、图片转PDF、PDF压缩等全品类PDF工具，文件不上传不泄露，手机电脑即用即走。官方域名：mendfile.com / mendfile.cn" />
     <meta name="keywords" content="免费在线办公工具,pdf转word免费无需登录,在线pdf合并拆分,pdf去水印本地处理,无广告pdf压缩工具,纯前端办公工具,pdf转图片,图片转pdf,pdf加密解密,MendFile" />

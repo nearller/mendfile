@@ -14,7 +14,8 @@ export type ToolCategory =
   | 'qr' // 二维码工具
   | 'image' // 图片工具全集
   | 'media' // 多媒体轻量工具（二期新增）
-  | 'office'; // 办公小工具合集（二期新增）
+  | 'office' // 办公小工具合集（二期新增）
+  | 'diagram'; // 在线设计：流程图 / 平面图 / 时序图
 
 export interface ToolConfig {
   key: string;
@@ -57,6 +58,7 @@ export const CATEGORY_META: Record<ToolCategory, { name: string; desc: string; c
   image: { name: '图片长图工具', desc: '图片压缩、格式互转、证件照、拼接、抠图、加水印', color: 'from-fuchsia-500 to-purple-600' },
   media: { name: '多媒体轻量工具', desc: '视频压缩裁剪格式转换、音频压缩裁剪格式转换', color: 'from-cyan-500 to-blue-500' },
   office: { name: '办公小工具合集', desc: '文本批量处理、工时/时间戳/密码生成/单位换算', color: 'from-lime-500 to-green-600' },
+  diagram: { name: '在线设计', desc: '在线流程图、平面图、时序图设计，支持保存/导入/导出PDF/JPG/PNG', color: 'from-indigo-500 to-purple-600' },
 };
 
 export const TOOLS_CONFIG: Record<string, ToolConfig> = {
@@ -1270,6 +1272,108 @@ export const TOOLS_CONFIG: Record<string, ToolConfig> = {
     },
     processor: P.unitConvert,
     showPreview: true,
+  },
+
+  'flowchart-designer': {
+    key: 'flowchart-designer',
+    path: '/tools/flowchart-designer',
+    name: '流程图设计',
+    shortDesc: '在线绘制流程/决策/逻辑图，支持开始/结束、步骤、判断、输入输出、箭头连接；JSON 工程本地保存，一键导出 PNG / JPG / PDF / SVG',
+    category: 'diagram',
+    icon: '📐',
+    title: '在线流程图设计 免费绘制导出PDF/JPG - MendFile 全能办公工具',
+    description: 'MendFile 在线流程图设计工具，无需注册登录、打开即用。支持标准流程图元素：圆角矩形（开始/结束）、矩形（步骤）、菱形（判断/分支）、平行四边形（输入/输出）、箭头/虚线连接、自由文本标签。拖拽绘制、批量移动，Ctrl/Cmd+Z 撤销；支持多人传阅工程文件、支持草稿自动保存（本地浏览器，误关页不丢失）、支持保存工程 JSON 到本地 / 导入 JSON 继续编辑；一键导出 PNG（高清2x）、JPG（白底）、PDF（嵌入高清渲染，适合存档传阅）、SVG（矢量，无损放大二次编辑）。全程 100% 本地浏览器画布，不上传任何内容。',
+    keywords: ['在线流程图', '流程图设计', '流程图画图', '流程图导出PDF', '可视化流程图', '逻辑流程图', '决策流程图', '纯前端流程图'],
+    features: [
+      '标准元素齐全：开始/结束、步骤、判断/分支、输入/输出、子流程、箭头连接、文本注释',
+      '拖拽绘制，多选批量移动/调整大小，Shift 画正方形/水平垂直线，Ctrl/Cmd+Z/Y 撤销重做',
+      'JSON 工程本地保存 / 导入：多人传阅或下次继续编辑无缝衔接；草稿自动按工具分别存储，误关页不丢',
+      '一键导出：PNG（高清 2x 透明）、JPG（白底适合打印）、SVG（矢量无损放大）、PDF（存档/分享）',
+      '支持图片粘贴/插入：可把流程截图、UI、素材贴到画布上混合绘图',
+      '100% 纯前端本地：您的设计图数据不离开浏览器设备，无后端、无上传、无登录',
+    ],
+    boundaries: [
+      '适合：业务流程、审批流程、产品逻辑、算法流程图、决策树、泳道图等标准办公绘图',
+      '复杂协作绘图（多用户实时协同）、专业 BPMN 2.0/EA/Visio 高级宏指令暂不支持',
+      'PDF 为高清图片嵌入的单页 PDF，保证所见即所得；如需矢量 PDF 请使用 SVG 再用外部工具转',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: '', // 设计类工具不需要先上传文件
+    multiple: false,
+    outputExt: 'pdf',
+    outputFileName: 'MendFile_流程图',
+    defaultOptions: {},
+    processor: P.diagramNoop,
+    showPreview: false,
+    fileRequired: false,
+  },
+
+  'floorplan-designer': {
+    key: 'floorplan-designer',
+    path: '/tools/floorplan-designer',
+    name: '平面图设计',
+    shortDesc: '在线绘制房屋平面布局图、办公室/店铺/仓库布局、水电走位示意；JSON 工程保存，导出 PNG / JPG / PDF / SVG',
+    category: 'diagram',
+    icon: '🏠',
+    title: '在线平面图设计 免费绘制布局图导出PDF - MendFile 全能办公工具',
+    description: 'MendFile 在线平面图设计工具，纯前端浏览器本地画布，打开即用。使用矩形、直线画墙体和房间轮廓，Shift 正交锁定画水平/垂直线，文本标注尺寸与房间名称；工具栏「图片」按钮可插入家具/卫浴/门窗/家电等素材图组合出完整室内布局。草稿自动保存，支持保存 JSON / 导入 JSON 继续编辑；一键导出 PNG（高清2x）、JPG（白底打印）、PDF（图纸存档）、SVG（矢量，CAD/PPT 二次编辑）。全程无需上传任何文件。',
+    keywords: ['在线平面图', '平面布局图', '房屋平面图', '店铺设计', '办公布局图', '水电走位示意', '户型图绘制', '装修布局'],
+    features: [
+      '矩形/直线画墙体，Shift 正交锁定保证线条水平垂直；多选批量对齐/移动',
+      '文本 + 尺寸标注（手动输入），支持网格显示便于参照比例',
+      '插入本地图片：家具/卫浴/门窗/家电等素材图直接拖入或插入',
+      'JSON 工程保存 / 导入，草稿自动存储（不串工具、不丢失）',
+      '一键导出高清 PNG / JPG / PDF / SVG 四种格式：打印/传阅/存档/二次编辑全覆盖',
+      '100% 纯前端本地：绘制过程全程在您的浏览器内，不离开设备，不上传',
+    ],
+    boundaries: [
+      '适合：房屋/店铺/办公室/仓库的布局示意、水电走位草图、摆位方案等一般办公绘图',
+      '不替代 AutoCAD / 专业建筑设计：精确施工尺寸、结构设计请以专业 CAD 软件出具的图纸为准',
+      '未内置图块库（家具/门窗图标需用户自行插入图片），后续版本根据反馈扩展图库',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: '',
+    multiple: false,
+    outputExt: 'pdf',
+    outputFileName: 'MendFile_平面图',
+    defaultOptions: {},
+    processor: P.diagramNoop,
+    showPreview: false,
+    fileRequired: false,
+  },
+
+  'sequence-designer': {
+    key: 'sequence-designer',
+    path: '/tools/sequence-designer',
+    name: '时序图设计',
+    shortDesc: '在线绘制接口时序图/系统调用链，参与者生命线+调用/返回消息+激活条；JSON 工程持久化，导出 PNG/JPG/PDF/SVG',
+    category: 'diagram',
+    icon: '🔀',
+    title: '在线时序图设计 接口调用链可视化导出PDF - MendFile 全能办公工具',
+    description: 'MendFile 在线时序图设计工具，浏览器本地打开即用，适合快速绘制前后端接口时序、微服务调用链、消息队列事务流程等。参与者框 + 生命线 + 调用箭头（实线）/ 返回箭头（虚线）/ 自调用 / 注释说明，自由拖拽调整布局，Ctrl/Cmd+Z 撤销；草稿自动保存，JSON 工程保存 / 导入；一键导出 PNG（高清2x）、JPG（白底）、PDF（嵌入高清图，方便技术评审分享）、SVG（矢量放大插入文档/PPT）。全程纯前端、无上传、无注册登录。',
+    keywords: ['在线时序图', '时序图绘制', '接口时序', '调用链图', '系统时序图', '消息时序图', 'UML时序图', 'UML 序列图'],
+    features: [
+      '文本框列参与者（从左到右），细直线画生命线，箭头工具画调用/返回消息',
+      '激活条 / 自调用 / 回调用虚线 / 注释说明全部支持，自由调节每条间距',
+      '多人传阅：保存 JSON 工程文件；同事接收后「导入 JSON」继续编辑 / 评审',
+      '草稿自动保存（按时序图工具独立存储，不与其它设计互串）、支持清空重画',
+      '一键导出 PNG/JPG/PDF/SVG：技术评审、文档插图、PPT/Word 报告一站式搞定',
+      '100% 纯前端本地处理，您的设计数据不上传服务器',
+    ],
+    boundaries: [
+      '适合：接口调用时序、交易流程、微服务链路、业务时序说明等一般技术文档绘图',
+      '非严格 PlantUML / Mermaid 文本 DSL 语法图（属于通用拖拽画布）；如需文本转图可使用 mermaid 等工具',
+      '自动布局（参与者自动排列间距）不强制提供，用户可自由拖拽调整最符合展示需求',
+    ],
+    boundaryCardStyle: 'amber',
+    accept: '',
+    multiple: false,
+    outputExt: 'pdf',
+    outputFileName: 'MendFile_时序图',
+    defaultOptions: {},
+    processor: P.diagramNoop,
+    showPreview: false,
+    fileRequired: false,
   },
 };
 
